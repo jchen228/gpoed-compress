@@ -22,36 +22,32 @@ Requirements:
     pip install numpy scipy matplotlib scikit-learn
 """
 
+import sys
+import os
+sys.path.insert(0, "/Users/jchen228/Desktop/gpoed-code-python")
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from scipy.spatial.distance import cdist
 from sklearn.utils.extmath import randomized_svd
 
+from pivoted_cholesky import pivoted_cholesky as _pc
+from rpgks import rpgks as _rpgks
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURATION  ←  only section you need to edit
 # ─────────────────────────────────────────────────────────────────────────────
 
-DATA_PATH   = "/Users/jchen228/Desktop/Argonne/100x500x500/Uf48.bin.f32"
-SLICE_LEVEL = 50    # which vertical level to slice (0–99)
-DOWNSAMPLE  = 7    # take every Nth pixel; 10 → 50×50 = 2500 candidate points
-N_SENSORS   = 75    # number of sensors to place
-LENGTHSCALE = 5.0   # kernel lengthscale in downsampled grid-index units
-VARIANCE    = 10.0   # kernel signal variance
-NOISE       = 1e-3  # observation noise / regularisation nugget
-KERNEL      = 'matern' # 'rbf'  or  'matern'  ← change this to switch kernels
-MATERN_NU   = 0.5   # Matérn smoothness — only used when KERNEL='matern'
-                    # choices: 0.5 (rough/exponential), 1.5, 2.5 (smooth)
-FIT_ON      = 'random' # which sensors to use when fitting hyperparameters:
-                    #   'maxmin'  — farthest-point spread; kernel-free (recommended)
-                    #   'uniform' — evenly spaced grid subset; kernel-free
-                    #   'random'  — random sample; kernel-free
-                    #   'greedy'  — uses manual LENGTHSCALE/VARIANCE/NOISE to place
-                    #               sensors first, then fits on them
-NORMALIZE   = True  # subtract mean and divide by std before Kriging, then
-                    # undo afterward. Helps the optimizer and stabilises the
-                    # covariance matrix when the data has a large offset or range.
+DATA_PATH          = "/Users/jchen228/Desktop/Argonne/100x500x500/Uf48.bin.f32"
+DOWNSAMPLE         = 3    # 500/3 ≈ 167 → ~167×167 = ~27,889 pts (higher res)
+N_SENSORS          = None  # None → auto 1% of grid points (~279 sensors)
+KERNEL             = 'matern'
+MATERN_NU          = 1.5
+N_TRAIN_FACTOR     = 4     # n_train = N_TRAIN_FACTOR × n_sensors
+SPLIT_SEED         = 42
+SHOWCASE_TRAIN_IDX = 49     # which training level to reconstruct (0 = first)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -358,7 +354,7 @@ def rp_cssp(X, k, cov_fn, lengthscale=1.0, variance=1.0, rank=None, rng=None):
         weights = diags / total
         si      = int(rng.choice(n, p=weights))           # random pivot
 
-        g = cov_fn(X, X[[si]], lengthscale, variance).ravel()  # (n,) kernel column
+        g = cov_kfn(X, X[[si]], lengthscale, variance).ravel()  # (n,) kernel column
         if i > 0:
             g = g - F[:, :i] @ F[si, :i]                 # subtract accumulated rank
 
@@ -592,195 +588,183 @@ def fit_hyperparams(X_obs, y_obs, kernel_name='rbf', nu=2.5,
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
+    import time
+    t_start = time.perf_counter()
 
-    # ── Load and prepare data ─────────────────────────────────────────────────
-    print("Loading ISABEL data...")
-    slice_2d = load_isabel_slice(DATA_PATH, SLICE_LEVEL, DOWNSAMPLE)
-    ny, nz   = slice_2d.shape
-    print(f"  2D slice shape: {slice_2d.shape}  "
-          f"(original 500×500 downsampled by {DOWNSAMPLE})")
-    print(f"  Value range:    {slice_2d.min():.2f}  to  {slice_2d.max():.2f} m/s")
+    # ── Load all vertical levels ───────────────────────────────────────────────
+    print("Loading ISABEL U-wind data (all levels)...")
+    with open(DATA_PATH, 'rb') as f:
+        raw = np.fromfile(f, dtype=np.float32)
+    data_all = raw.reshape((100, 500, 500))[:, ::DOWNSAMPLE, ::DOWNSAMPLE]   # (100,ny,nz)
 
-    # Build (n, 2) array of grid-index coordinates and flat value array
-    yv, zv = np.arange(ny), np.arange(nz)
-    Yg, Zg = np.meshgrid(yv, zv, indexing='ij')
-    XY   = np.column_stack([Yg.ravel(), Zg.ravel()])   # candidate locations
-    vals = slice_2d.ravel()                              # true values everywhere
-    n    = len(XY)
-    print(f"  Candidate points: {n}")
+    ny, nz = data_all.shape[1], data_all.shape[2]
+    n      = ny * nz
 
-    # ── Normalisation ─────────────────────────────────────────────────────────
-    # Work in normalised space throughout; convert back for errors and plots.
-    vals_mean = vals.mean()
-    vals_std  = vals.std()
-    if NORMALIZE:
-        vals_fit = (vals - vals_mean) / vals_std   # zero mean, unit variance
-        print(f"  Normalised: mean={vals_mean:.2f}  std={vals_std:.2f}")
-    else:
-        vals_fit = vals                             # use raw values unchanged
+    n_sensors = N_SENSORS if N_SENSORS is not None else max(1, n // 100)
+    print(f"  Grid: {ny}×{nz} = {n} pts  |  Sensors: {n_sensors} (1% of {n})")
 
-    # ── Select kernel ─────────────────────────────────────────────────────────
-    cov_fn = get_kernel(KERNEL, MATERN_NU)
-    print(f"Kernel: {KERNEL}" + (f" (ν={MATERN_NU})" if KERNEL == 'matern' else ""))
+    # ── Skip first 10 near-surface levels (near-zero → inflated rel. error) ───
+    SKIP_LEVELS = 10
+    data     = data_all[SKIP_LEVELS:]          # (90, ny, nz)
+    n_levels = data.shape[0]
 
-    # ── Step 1: Place sensors for hyperparameter fitting ─────────────────────
-    # FIT_ON controls which method is used (set at top of file).
-    print(f"\nPlacing {N_SENSORS} sensors...")
-    pk_maxmin = maxmin_ordering(XY, N_SENSORS)
-    print("  MaxMin done")
+    # ── Train / test split (identical to multigp_hurricane.py) ────────────────
+    n_train = min(N_TRAIN_FACTOR * n_sensors, n_levels - 10)
+    n_train = max(n_train, 4)
+    rng_s   = np.random.default_rng(SPLIT_SEED)
+    train_idx = np.sort(rng_s.choice(n_levels, size=n_train, replace=False))
 
-    if FIT_ON == 'maxmin':
-        # Kernel-free: no circular dependency. Recommended default.
-        pk_for_fit = pk_maxmin
-        fit_label  = 'MaxMin'
+    train_data = data[train_idx]               # (n_train, ny, nz)
+    print(f"  Using levels {SKIP_LEVELS}–99  |  n_train={n_train}  "
+          f"(seed={SPLIT_SEED})")
 
-    elif FIT_ON == 'uniform':
-        # Pick N_SENSORS points from the grid at roughly equal spacing.
-        # stride = total points / sensors, rounded to the nearest integer.
-        # Kernel-free: no circular dependency.
-        stride     = max(1, n // N_SENSORS)
-        pk_for_fit = np.arange(0, n, stride)[:N_SENSORS]
-        fit_label  = 'Uniform'
-        print(f"  Uniform grid: every {stride}th point")
+    # ── Per-location normalisation from training data ──────────────────────────
+    # Subtract per-location training mean and divide by per-location training std.
+    # Identical to multigp_hurricane.py normalise/denormalise.
+    train_flat  = train_data.reshape(n_train, n)   # (n_train, n)
+    train_mean  = train_flat.mean(axis=0)           # (n,)
+    train_std   = train_flat.std(axis=0)            # (n,)
+    train_std   = np.where(train_std < 1e-10, 1.0, train_std)
 
-    elif FIT_ON == 'random':
-        # Draw N_SENSORS points uniformly at random (fixed seed for reproducibility).
-        # Kernel-free: no circular dependency.
-        rng_fit    = np.random.default_rng(42)
-        pk_for_fit = rng_fit.choice(n, size=N_SENSORS, replace=False)
-        fit_label  = 'Random'
-        print(f"  Random sample: {N_SENSORS} points (seed=42)")
+    def normalise(field_flat):
+        return (field_flat - train_mean) / train_std
 
-    elif FIT_ON == 'greedy':
-        # Greedy needs a kernel, so it uses the manual config values
-        # (LENGTHSCALE, VARIANCE, NOISE) for placement. The fitted
-        # hyperparameters may differ from these starting values.
-        print(f"  Running Greedy with manual hyperparams for fitting "
-              f"(ls={LENGTHSCALE}, var={VARIANCE}, noise={NOISE})...")
-        pk_for_fit = greedy_error(XY, vals_fit, N_SENSORS,
-                                  lengthscale=LENGTHSCALE, variance=VARIANCE,
-                                  noise=NOISE, kernel=cov_fn)
-        fit_label  = 'Greedy'
-        print("  Greedy (for fitting) done")
+    def denormalise(field_norm):
+        return field_norm * train_std + train_mean
 
-    else:
-        raise ValueError(
-            f"FIT_ON must be 'maxmin', 'uniform', 'random', or 'greedy'; got '{FIT_ON}'"
-        )
+    train_norm = normalise(train_flat)             # (n_train, n)
 
-    # ── Step 2: Fit hyperparameters on chosen sensors ─────────────────────────
-    print(f"\nFitting hyperparameters via marginal likelihood (on {fit_label} sensors)...")
-    hp = fit_hyperparams(XY[pk_for_fit], vals_fit[pk_for_fit],
-                         kernel_name=KERNEL, nu=MATERN_NU, n_restarts=5)
+    # ── Build spatial coordinates ─────────────────────────────────────────────
+    yi, zi = np.arange(ny), np.arange(nz)
+    Yg, Zg = np.meshgrid(yi, zi, indexing='ij')
+    XY = np.column_stack([Yg.ravel(), Zg.ravel()])    # (n, 2)
+
+    # ── Fit hyperparameters on a random subset of training observations ────────
+    # Use one training level (the showcase level) as the fitting set so the
+    # hyperparameters reflect the actual field being reconstructed.
+    cov_fn  = get_kernel(KERNEL, MATERN_NU)
+    si      = SHOWCASE_TRAIN_IDX
+    fit_vals = train_norm[si]                          # (n,) normalised field
+
+    # Sub-sample for fitting — fitting on all n points is slow
+    rng_fit   = np.random.default_rng(0)
+    fit_idx   = rng_fit.choice(n, size=min(n_sensors * 4, n), replace=False)
+    print(f"\nFitting hyperparameters on {len(fit_idx)} random points "
+          f"(kernel={KERNEL}, ν={MATERN_NU})...")
+    hp = fit_hyperparams(XY[fit_idx], fit_vals[fit_idx],
+                         kernel_name=KERNEL, nu=MATERN_NU, n_restarts=3)
     LS        = hp['lengthscale']
     VAR       = hp['variance']
     NOISE_FIT = hp['noise']
-    print(f"  Using: lengthscale={LS:.3f}  variance={VAR:.3f}  noise={NOISE_FIT:.2e}")
+    print(f"  ls={LS:.3f}  var={VAR:.3f}  noise={NOISE_FIT:.2e}")
 
-    # ── Step 3: Build covariance matrix with fitted hyperparameters ───────────
-    print("\nBuilding covariance matrix with fitted hyperparameters...")
-    C = cov_fn(XY, XY, LS, VAR) + NOISE_FIT * np.eye(n)
+    # ── Shared ground truth ────────────────────────────────────────────────────
+    lvl_global = int(train_idx[si]) + SKIP_LEVELS
+    true_norm  = train_norm[si]          # (n,) normalised ground truth
+    true_orig  = denormalise(true_norm)  # (n,) original units
+    true_2d    = true_orig.reshape(ny, nz)
+    vmin, vmax = true_2d.min(), true_2d.max()
 
-    # ── Step 4: CSSP on the well-calibrated covariance matrix ────────────────
-    pk_cssp = cssp(C, N_SENSORS)
-    print("  CSSP done")
+    # Helper: kernel wrapper with fixed hyperparams (matches pivoted_cholesky API)
+    def _kfn(A, B):
+        return cov_fn(A, B, LS, VAR)
 
-    # RPCholesky + RPGKS (scalable alternative to CSSP — no full n×n matrix needed)
-    pk_rpcssp, _ = rp_cssp(XY, N_SENSORS, cov_fn,
-                            lengthscale=LS, variance=VAR, rank=min(3*N_SENSORS, n))
-    print("  RPCholesky + RPGKS done")
+    # ── Method 1: GKS via Randomly Pivoted Cholesky (scalable for large n) ─────
+    print(f"\n[Method 1] GKS via RP Cholesky: placing {n_sensors} sensors...")
+    t_p0  = time.perf_counter()
+    pk_gks, _ = rp_cssp(XY, n_sensors, cov_fn,
+                         lengthscale=LS, variance=VAR,
+                         rank=n_sensors,
+                         rng=np.random.default_rng(0))
+    print(f"  Done  ({time.perf_counter()-t_p0:.2f}s)")
 
-    # ── Step 5: Greedy placement with fitted hyperparameters ─────────────────
-    # If FIT_ON='greedy', we reuse the sensors already placed above (avoids
-    # running greedy twice). Otherwise run it fresh with the fitted hyperparams.
-    # Greedy is slow — comment out the else branch if n is large.
-    if FIT_ON == 'greedy':
-        pk_greedy = pk_for_fit
-        print("  Greedy reused from fitting step")
-    else:
-        pk_greedy = greedy_error(XY, vals_fit, N_SENSORS,
-                                 lengthscale=LS, variance=VAR, noise=NOISE_FIT,
-                                 kernel=cov_fn)
-        print("  Greedy done")
-
-    # ── Kriging reconstructions ───────────────────────────────────────────────
-    # All Kriging runs use vals_fit (normalised if NORMALIZE=True).
-    # Outputs are denormalised back to original units before errors and plots.
-    print("\nRunning Kriging...")
-    kw = dict(lengthscale=LS, variance=VAR, noise=NOISE_FIT, kernel=cov_fn)
-
-    def denorm(mu):
-        """Convert normalised predictions back to original wind-speed units."""
-        return mu * vals_std + vals_mean if NORMALIZE else mu
-
-    # Simple Kriging with each placement method
-    mu_sk_cssp,    _, _ = simple_kriging(XY[pk_cssp],   vals_fit[pk_cssp],   XY, **kw)
-    mu_sk_maxmin,  _, _ = simple_kriging(XY[pk_maxmin], vals_fit[pk_maxmin], XY, **kw)
-    mu_sk_greedy,  _, _ = simple_kriging(XY[pk_greedy], vals_fit[pk_greedy], XY, **kw)
-    mu_sk_rpcssp,  _, _ = simple_kriging(XY[pk_rpcssp], vals_fit[pk_rpcssp], XY, **kw)
-
-    mu_sk_cssp   = denorm(mu_sk_cssp)
-    mu_sk_maxmin = denorm(mu_sk_maxmin)
-    mu_sk_greedy = denorm(mu_sk_greedy)
-    mu_sk_rpcssp = denorm(mu_sk_rpcssp)
-
-    # Universal Kriging with RPCholesky and Greedy sensors
-    mu_uk_rpcssp, _ = universal_kriging(
-        XY[pk_rpcssp], vals_fit[pk_rpcssp], XY,
-        basis_funcs=[lambda X: np.ones(len(X)), lambda X: X[:, 0]], **kw
+    t_r0 = time.perf_counter()
+    mu_gks_norm, _, _ = simple_kriging(
+        XY[pk_gks], true_norm[pk_gks], XY,
+        m0=0.0, lengthscale=LS, variance=VAR, noise=NOISE_FIT, kernel=cov_fn
     )
-    mu_uk_greedy, _ = universal_kriging(
-        XY[pk_greedy], vals_fit[pk_greedy], XY,
-        basis_funcs=[lambda X: np.ones(len(X)), lambda X: X[:, 0]], **kw
+    mu_gks = denormalise(mu_gks_norm)
+    print(f"  Reconstruction done  ({time.perf_counter()-t_r0:.2f}s)")
+    err_gks = np.linalg.norm(mu_gks - true_orig) / np.linalg.norm(true_orig)
+
+    # ── Method 2: GKS via Greedy Pivoted Cholesky (deterministic) ─────────────
+    # Uses pivoted_cholesky(method='greedy') + rpgks from gpoed-code-python.
+    # Greedy pivoting always picks the point with the largest residual variance,
+    # giving a deterministic low-rank factor F, then RPGKS selects the k sensors.
+    print(f"\n[Method 2] GKS via Greedy Pivoted Cholesky: placing {n_sensors} sensors...")
+    t_p1  = time.perf_counter()
+    rank_g = n_sensors
+    F_greedy, _, _ = _pc(_kfn, XY, rank_g, method='greedy')
+    pk_greedy      = _rpgks(F_greedy, n_sensors)
+    print(f"  Done  ({time.perf_counter()-t_p1:.2f}s)")
+
+    t_r1 = time.perf_counter()
+    mu_greedy_norm, _, _ = simple_kriging(
+        XY[pk_greedy], true_norm[pk_greedy], XY,
+        m0=0.0, lengthscale=LS, variance=VAR, noise=NOISE_FIT, kernel=cov_fn
     )
-    mu_uk_rpcssp = denorm(mu_uk_rpcssp)
-    mu_uk_greedy = denorm(mu_uk_greedy)
+    mu_greedy = denormalise(mu_greedy_norm)
+    print(f"  Reconstruction done  ({time.perf_counter()-t_r1:.2f}s)")
+    err_greedy = np.linalg.norm(mu_greedy - true_orig) / np.linalg.norm(true_orig)
 
-    # ── Reconstruction errors (in original units) ─────────────────────────────
-    print("\nRelative reconstruction errors (lower is better):")
-    results = [
-        ('Simple  + CSSP',        mu_sk_cssp),
-        ('Simple  + MaxMin',      mu_sk_maxmin),
-        ('Simple  + Greedy',      mu_sk_greedy),
-        ('Simple  + RPCholesky',  mu_sk_rpcssp),
-        ('Universal + RPCholesky',mu_uk_rpcssp),
-        ('Universal + Greedy',    mu_uk_greedy),
-    ]
-    for label, mu in results:
-        err = np.linalg.norm(mu - vals) / np.linalg.norm(vals)
-        print(f"  {label:<26} {err:.4f}")
+    # ── Summary ────────────────────────────────────────────────────────────────
+    print(f"\n{'═'*60}")
+    print(f"  Training level {lvl_global}  |  Grid: {ny}×{nz}  |  Sensors: {n_sensors}")
+    print(f"  GKS (RP Cholesky)      rel. L2 error: {err_gks*100:.2f}%")
+    print(f"  GKS (Greedy Cholesky)  rel. L2 error: {err_greedy*100:.2f}%")
+    print(f"{'═'*60}")
+    print(f"  Total wall time: {time.perf_counter()-t_start:.1f}s")
 
-    # ── Plots ─────────────────────────────────────────────────────────────────
-    def show(ax, field, title, sensors=None):
-        """Helper: plot a reconstructed field with optional sensor markers."""
-        im = ax.imshow(field.reshape(ny, nz), origin='lower', cmap='RdBu_r',
-                       vmin=vals.min(), vmax=vals.max(), aspect='auto')
-        if sensors is not None:
-            # XY columns are [y-index, z-index]; imshow x-axis = z, y-axis = y
-            ax.scatter(XY[sensors, 1], XY[sensors, 0],
-                       c='k', s=25, marker='x', linewidths=1, label='sensors')
-        ax.set_title(title, fontsize=9)
-        ax.set_xlabel('z  (altitude index)')
-        ax.set_ylabel('y  (latitude index)')
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='U wind (m/s)')
+    # ── Figure: 2 × 3 panel comparison ────────────────────────────────────────
+    recon_gks    = mu_gks.reshape(ny, nz)
+    recon_greedy = mu_greedy.reshape(ny, nz)
+    err_gks_2d   = np.abs(recon_gks    - true_2d)
+    err_greedy_2d= np.abs(recon_greedy - true_2d)
+    emax = max(err_gks_2d.max(), err_greedy_2d.max())
 
-    fig, axes = plt.subplots(2, 4, figsize=(20, 9))
+    rc_gks    = (pk_gks    // nz, pk_gks    % nz)
+    rc_greedy = (pk_greedy // nz, pk_greedy % nz)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10),
+                             gridspec_kw={'wspace': 0.38, 'hspace': 0.45})
     fig.suptitle(
-        f'ISABEL U-wind — vertical level {SLICE_LEVEL},  '
-        f'{N_SENSORS} sensors,  {ny}×{nz} grid',
-        fontsize=12
+        f'ISABEL U-wind — Single-output GP (Simple Kriging)\n'
+        f'Training level {lvl_global}  |  {ny}×{nz} grid  |  '
+        f'{n_sensors} sensors  |  Kernel: {KERNEL} ν={MATERN_NU}  |  ls={LS:.2f}',
+        fontsize=10, y=1.01
     )
 
-    show(axes[0, 0], vals,          'True field  (no sensors)')
-    show(axes[0, 1], mu_sk_cssp,   f'Simple Kriging + CSSP',    pk_cssp)
-    show(axes[0, 2], mu_sk_maxmin, f'Simple Kriging + MaxMin',  pk_maxmin)
-    show(axes[0, 3], mu_sk_greedy, f'Simple Kriging + Greedy',  pk_greedy)
-    show(axes[1, 0], vals,          'True field  (no sensors)')
-    show(axes[1, 1], mu_uk_rpcssp,   f'Universal Kriging + RPCholesky',  pk_rpcssp)
-    show(axes[1, 2], mu_uk_greedy,   f'Universal Kriging + Greedy', pk_greedy)
-    show(axes[1, 3], mu_sk_rpcssp, f'Simple Kriging + RPCholesky', pk_rpcssp)
+    def panel(ax, field, title, cmap='RdBu_r', vm=None, vM=None, src=None):
+        im = ax.imshow(field, origin='lower', cmap=cmap,
+                       vmin=vm, vmax=vM, aspect='auto')
+        if src is not None:
+            ax.scatter(src[1], src[0], c='k', s=8, marker='x',
+                       linewidths=0.7, zorder=5, label=f'{n_sensors} sensors')
+            ax.legend(loc='lower right', fontsize=6, framealpha=0.6)
+        ax.set_title(title, fontsize=9, pad=4)
+        ax.set_xlabel('Longitude idx', fontsize=7)
+        ax.set_ylabel('Latitude idx',  fontsize=7)
+        ax.tick_params(labelsize=6)
+        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=6)
 
-    plt.tight_layout()
-    plt.savefig('/Users/jchen228/Desktop/Argonne/kriging_results.png', dpi=150)
+    # Row 0: GKS via RP Cholesky
+    panel(axes[0,0], true_2d,     f'True field (level {lvl_global})',
+          vm=vmin, vM=vmax)
+    panel(axes[0,1], recon_gks,   f'GKS (RP Cholesky)\nrel. err = {err_gks*100:.2f}%',
+          vm=vmin, vM=vmax, src=rc_gks)
+    panel(axes[0,2], err_gks_2d,  f'|Error| – RP Cholesky\nmax = {err_gks_2d.max():.2f} m/s',
+          cmap='hot_r', vm=0, vM=emax)
+
+    # Row 1: GKS via Greedy Pivoted Cholesky
+    panel(axes[1,0], true_2d,       f'True field (level {lvl_global})',
+          vm=vmin, vM=vmax)
+    panel(axes[1,1], recon_greedy,  f'GKS (Greedy Chol.)\nrel. err = {err_greedy*100:.2f}%',
+          vm=vmin, vM=vmax, src=rc_greedy)
+    panel(axes[1,2], err_greedy_2d, f'|Error| – Greedy Chol.\nmax = {err_greedy_2d.max():.2f} m/s',
+          cmap='hot_r', vm=0, vM=emax)
+
+    fig.savefig('/Users/jchen228/Desktop/Argonne/kriging_results.png',
+                dpi=150, bbox_inches='tight')
     plt.show()
-    print("\nPlot saved to kriging_results.png")
+    print("\nSaved: kriging_results.png")

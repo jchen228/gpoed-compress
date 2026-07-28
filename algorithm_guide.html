@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>rate_distortion_comparison.py — Algorithm Guide</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 1100px; margin: 40px auto; padding: 0 24px; line-height: 1.65; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 1.6em; border-bottom: 3px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 1.25em; margin-top: 2em; border-left: 5px solid #888; padding-left: 10px; background: #f0f0f0; padding: 6px 10px; border-radius: 2px; }
+  h3 { font-size: 1.05em; margin-top: 1.4em; color: #333; }
+  code { font-family: "Courier New", monospace; font-size: 0.88em; }
+  .step { margin: 0.5em 0 0.5em 1.2em; }
+  .step-num { font-weight: bold; min-width: 2em; display: inline-block; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+  th { background: #ddd; text-align: left; padding: 6px 10px; }
+  td { padding: 5px 10px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  .note { background: #fff8dc; border-left: 4px solid #e8c000; padding: 8px 12px; margin: 1em 0; font-size: 0.92em; border-radius: 2px; }
+  .formula { background: #f5f5f5; border: 1px solid #ccc; padding: 8px 14px; margin: 0.6em 0; border-radius: 4px; font-family: "Courier New", monospace; font-size: 0.9em; }
+
+  /* ── Shared-variable colour chips ────────────────────────────────── */
+  /* Each colour = one concept shared across methods */
+
+  .sv-ab     { background:#ffd6d6; border-radius:3px; padding:1px 5px; }  /* abs_bound — red */
+  .sv-k      { background:#d6eaff; border-radius:3px; padding:1px 5px; }  /* k (num sensors/modes) — blue */
+  .sv-ds     { background:#d6ffd6; border-radius:3px; padding:1px 5px; }  /* DS downsample — green */
+  .sv-nb     { background:#ffe8b3; border-radius:3px; padding:1px 5px; }  /* NUM_BINS — orange */
+  .sv-level  { background:#e8d6ff; border-radius:3px; padding:1px 5px; }  /* LEVEL (metric slice) — purple */
+  .sv-cr     { background:#b3f0f0; border-radius:3px; padding:1px 5px; }  /* CR / CR_no_model — teal */
+  .sv-model  { background:#ffe0f0; border-radius:3px; padding:1px 5px; }  /* model_b / model bytes — pink */
+  .sv-quant  { background:#fff0b3; border-radius:3px; padding:1px 5px; }  /* quantize / pack_encode — yellow */
+
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin:1.2em 0; font-size:0.88em; }
+  .legend-item { display:flex; align-items:center; gap:6px; }
+  .chip { display:inline-block; width:18px; height:18px; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<h1>rate_distortion_comparison.py — Step-by-Step Algorithm Guide</h1>
+<p>This document explains what every algorithm in the script does, in the order executed.
+Coloured highlights show variables and toggles that are <strong>shared across methods</strong>.</p>
+
+<div class="legend">
+  <div class="legend-item"><span class="chip" style="background:#ffd6d6"></span> <code>abs_bound</code> — residual error tolerance (same sweep for all methods)</div>
+  <div class="legend-item"><span class="chip" style="background:#d6eaff"></span> <code>k</code> — number of sensors / modes / basis vectors</div>
+  <div class="legend-item"><span class="chip" style="background:#d6ffd6"></span> <code>DS</code> — spatial downsampling factor (10 → 50×50/level)</div>
+  <div class="legend-item"><span class="chip" style="background:#ffe8b3"></span> <code>NUM_BINS</code> — quantization bins (65536, matching SZ2)</div>
+  <div class="legend-item"><span class="chip" style="background:#e8d6ff"></span> <code>LEVEL</code> — z-slice used for PSNR/SSIM evaluation</div>
+  <div class="legend-item"><span class="chip" style="background:#b3f0f0"></span> <code>CR</code> / <code>CR_no_model</code> — compression ratio outputs</div>
+  <div class="legend-item"><span class="chip" style="background:#ffe0f0"></span> <code>model_b</code> — losslessly stored model bytes</div>
+  <div class="legend-item"><span class="chip" style="background:#fff0b3"></span> <code>quantize</code> / <code>pack_encode</code> — shared SZ-style coder</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>0 — Shared Infrastructure</h2>
+
+<h3>0.1 Quantizer (<code>quantize</code> / <code>dequantize</code>)</h3>
+<p>Every method (except SZ2/ZFP which use libpressio internally) runs residuals through the
+same SZ-style quantizer. This ensures a fair apples-to-apples comparison.</p>
+<div class="step"><span class="step-num">①</span>
+  Compute <span class="sv-ab">bin_width = 2 × abs_bound</span> / <span class="sv-nb">NUM_BINS</span>.
+</div>
+<div class="step"><span class="step-num">②</span>
+  For each residual value: <code>bin_index = round(value / bin_width)</code>.
+  Values whose |bin_index| ≥ <span class="sv-nb">NUM_BINS/2</span> are "outliers" — stored as raw float32 (same as SZ2's unpredictable-point storage).
+</div>
+<div class="step"><span class="step-num">③</span>
+  Non-outlier bins stored as int16. Outlier positions stored as int32.
+</div>
+<div class="formula">bin_width = 2 × abs_bound / 65536</div>
+
+<h3>0.2 Entropy coder (<code>pack_encode</code>)</h3>
+<p>Mirrors SZ2's Huffman + Zstd pipeline without actually encoding (for speed).</p>
+<div class="step"><span class="step-num">①</span> Compute symbol frequency distribution of bin indices.</div>
+<div class="step"><span class="step-num">②</span> Estimate compressed size via Shannon entropy: <code>size = ⌈H × n / 8⌉ + codebook</code>, where H is entropy in bits/symbol.</div>
+<div class="step"><span class="step-num">③</span> Compress outlier positions with Zstd; outlier values stored raw.</div>
+<div class="step"><span class="step-num">④</span> Return a dummy bytes object of exactly this estimated length — used only for <span class="sv-cr">CR computation</span>.</div>
+
+<h3>0.3 Model compression helpers</h3>
+<p>All model components are compressed losslessly before counting bytes:</p>
+<table>
+  <tr><th>Function</th><th>Dtype</th><th>Used for</th></tr>
+  <tr><td><code>compress_f16(a)</code></td><td>float16 + Zstd</td><td>Basis matrices (Phi, K_Xs)</td></tr>
+  <tr><td><code>compress_f32(a)</code></td><td>float32 + Zstd</td><td>Mean, std, Cholesky factors</td></tr>
+  <tr><td><code>compress_i32(a)</code></td><td>int32 + Zstd</td><td>Sensor location indices</td></tr>
+</table>
+
+<h3>0.4 Metrics</h3>
+<p>All methods evaluate quality on the <span class="sv-level">LEVEL=50 z-slice</span> of the <span class="sv-ds">downsampled</span> reconstruction.</p>
+<div class="formula">PSNR = 20 × log₁₀( (max−min) / RMSE )</div>
+<div class="formula">SSIM = structural_similarity(orig, recon, data_range=max−min)</div>
+
+<h3>0.5 Compression ratio</h3>
+<div class="formula"><span class="sv-cr">CR = (n_3D_ds × 4 bytes) / total_compressed_bytes</span></div>
+<div class="formula"><span class="sv-cr">CR_no_model = (n_3D_ds × 4) / (sv_bytes + resid_bytes)</span>   ← model storage treated as free</div>
+<p><code>n_3D_ds = n_levels × (500/<span class="sv-ds">DS</span>) × (500/<span class="sv-ds">DS</span>)</code> — the actual bytes being compressed.
+MultiGP uses <code>d × n_3D_ds</code> since it jointly compresses 2 fields.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>1 — SZ2 (baseline)</h2>
+<p><strong>Mode:</strong> absolute error bound. <strong>Library:</strong> libpressio. <strong>Input:</strong> full 3D downsampled volume.</p>
+
+<div class="step"><span class="step-num">①</span>
+  <strong>Downsample:</strong> <code>data_ds = data[:, ::<span class="sv-ds">DS</span>, ::<span class="sv-ds">DS</span>]</code> → shape (100, 50, 50). <code>np.ascontiguousarray</code> required for libpressio.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Compress:</strong> call <code>libpressio</code> with <code>{"pressio:abs": <span class="sv-ab">abs_bound</span>}</code>. SZ2 internally runs: Lorenzo predictor → quantize → Huffman → Zstd.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong>Decompress:</strong> libpressio decode → reconstructed array.
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Metrics:</strong> PSNR/SSIM on <code>data_ds[<span class="sv-level">LEVEL</span>]</code> vs <code>recon[<span class="sv-level">LEVEL</span>]</code>.
+</div>
+<div class="step"><span class="step-num">⑤</span>
+  <strong>CR:</strong> read from <code>comp.get_metrics()["size:compression_ratio"]</code> — this is libpressio's own measurement.
+</div>
+<p>Sweep: <span class="sv-ab">ABS_BOUNDS = logspace(−4, −0.5, 8)</span>. One row per abs_bound.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>2 — ZFP (baseline)</h2>
+<p><strong>Mode:</strong> fixed-accuracy (absolute error). <strong>Library:</strong> libpressio. <strong>Input:</strong> same downsampled volume as SZ2.</p>
+
+<div class="step"><span class="step-num">①</span>
+  Same <span class="sv-ds">downsample</span> step as SZ2.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Compress:</strong> call <code>libpressio</code> with <code>{"zfp:accuracy": <span class="sv-ab">abs_bound</span>}</code>. ZFP internally uses a wavelet-like block transform on 4×4×4 blocks.
+</div>
+<div class="step"><span class="step-num">③–⑤</span>
+  Decompress, metrics, and CR identical to SZ2.
+</div>
+<p>Sweep: <span class="sv-ab">ZFP_ABS_BOUNDS = logspace(−4, −0.5, 8)</span> (same range as SZ2). <code>abs_bound</code> stored in CSV for both methods.</p>
+
+<div class="note">
+  <strong>Why fixed-accuracy?</strong> The reference paper (<em>Error-Controlled Lossy Compression…</em> Fig. 6) used absolute error bound mode for both SZ and ZFP. Fixed-rate ZFP gives worse RD curves on this data.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>3 — T-DEIM (Tensor DEIM)</h2>
+<p><strong>Outer loop:</strong> <span class="sv-k">k</span> (basis vectors). <strong>Inner loop:</strong> <span class="sv-ab">abs_bound</span> (residual quantization).</p>
+
+<h3>3.1 Offline (once per run)</h3>
+<div class="step"><span class="step-num">①</span>
+  <strong>Downsample:</strong> <code>data_ds = data[:, ::<span class="sv-ds">DS</span>, ::<span class="sv-ds">DS</span>]</code> → (n_L, 50, 50).
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Subtract mean:</strong> <code>F = (data_ds − mean_ds).reshape(n_L, n_2D)</code> — snapshot matrix shape (100, 2500).
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong>SVD:</strong> <code>Phi, svs = tdeim.build_3d_basis(F, k_max)</code>. Phi is shape (n_3D_ds, k_max) — the global 3D POD basis. This is the key difference from DEIM-2D: modes span all levels simultaneously.
+</div>
+
+<h3>3.2 Per-<span class="sv-k">k</span> (offline, model building)</h3>
+<div class="step"><span class="step-num">①</span>
+  Truncate: <code>Phi_k = Phi[:, :<span class="sv-k">k</span>]</code> shape (n_3D_ds, k).
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Q-DEIM sensor placement:</strong> QR with column pivoting on <code>Phi_k.T</code> → pivot indices <code>p[:k]</code> into the flat 3D array. Sensors are distributed across levels and spatial locations.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong>Model bytes:</strong> <span class="sv-model">model_b</span> = <code>|compress_f16(Phi_k)|</code> + <code>|compress_i32(sensors)|</code> + <code>|compress_f32(mean_ds)|</code>.
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Read sensor values:</strong> <code>y_s = data_flat[sensors]</code> — exact float32, centred. Encode as float16 + Zstd → <code>sv_enc</code>.
+</div>
+<div class="step"><span class="step-num">⑤</span>
+  <strong>Reconstruct (once):</strong> solve <code>Phi_k[sensors, :] · c = y_s</code> → <code>c</code> → <code>recon = Phi_k · c + mean</code>. Residual = <code>data_ds − recon</code>.
+</div>
+
+<h3>3.3 Per-<span class="sv-ab">abs_bound</span> (online, compression)</h3>
+<div class="step"><span class="step-num">①</span>
+  <strong><span class="sv-quant">Quantize residuals:</span></strong> <code>quantize(resid, <span class="sv-ab">abs_bound</span>, <span class="sv-nb">NUM_BINS</span>)</code>.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong><span class="sv-quant">Entropy-encode:</span></strong> <code>pack_encode(bins, outlier_pos, outlier_vals)</code> → <code>resid_enc</code>.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong><span class="sv-cr">CR</span> = (n_3D_ds × 4) / (<span class="sv-model">model_b</span> + |sv_enc| + |resid_enc|).</strong>
+</div>
+<div class="step"><span class="step-num">④</span>
+  Dequantize, reconstruct final field, compute PSNR/SSIM on <span class="sv-level">LEVEL</span> slice.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>4 — MultiGP (d=2, CLOUDf + QVAPORf)</h2>
+<p><strong>Outer loop:</strong> <span class="sv-k">k</span>. <strong>Inner loop:</strong> <span class="sv-ab">abs_bound</span>. Jointly compresses two fields using a Linear Model of Coregionalization (LMC/ICM) GP.</p>
+
+<h3>4.1 Offline setup</h3>
+<div class="step"><span class="step-num">①</span>
+  <strong>Downsample both fields:</strong> <code>data_ds0, data_ds1</code> → each (100, 50, 50). Stack into <code>data_nd</code> shape (100, 2500, 2).
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Train split:</strong> randomly select 70% of levels as training data. Compute per-location mean and std across training levels, per field.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong>Fit hyperparameters</strong> (lengthscale <code>ls</code>, variance <code>var</code>, cross-field covariance matrix <code>B</code>) via maximum likelihood on normalized training data. Uses Matérn-5/2 kernel evaluated on a coarse grid (<code>HP_DS=5</code>) for speed.
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Max-<span class="sv-k">k</span> sensor placement (GKS/RPCholesky):</strong> greedy kernel column selection on the full 2500-point grid to find the most informative locations. Precomputed once.
+</div>
+
+<h3>4.2 Per-<span class="sv-k">k</span></h3>
+<div class="step"><span class="step-num">①</span>
+  Take first <span class="sv-k">k</span> sensor locations <code>s_k</code>. Assemble block kernel matrix <code>K_sub = kron(B, K_ss_k) + σ²I</code> shape (d·k × d·k).
+</div>
+<div class="step"><span class="step-num">②</span>
+  Cholesky factor <code>L_kd</code> of <code>K_sub</code>. Compute cross-covariance <code>K_Xs</code> shape (n_2D, k).
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong><span class="sv-model">Model bytes:</span></strong> compress_f16(K_Xs) + compress_f32(L_kd) + compress_f32(train_mean) + compress_f32(train_std) + compress_f32(B) + compress_f16(hyperparams) + compress_i32(sensor_indices).
+</div>
+<div class="step"><span class="step-num">④</span>
+  Read sensor values for both fields: <code>all_sv_orig</code> shape (n_L, k, 2). Encode as float16 flat → <code>sv_enc</code>.
+</div>
+
+<h3>4.3 Prediction (per-<span class="sv-k">k</span>, once)</h3>
+<div class="step"><span class="step-num">①</span>
+  For each level: <code>y_norm = [normalize(sensors_field0), normalize(sensors_field1)]</code> shape (2k,).
+</div>
+<div class="step"><span class="step-num">②</span>
+  Solve: <code>alpha = L_kd \ y_norm</code> (Cholesky back-solve).
+</div>
+<div class="step"><span class="step-num">③</span>
+  GP posterior mean for field <em>i</em>: <code>mu_i = Σ_j B[i,j] × K_Xs × alpha[j·k:(j+1)·k]</code>. Denormalize → reconstruction.
+</div>
+<div class="step"><span class="step-num">④</span>
+  Residual for both fields: <code>resid = (data_nd − recon_nd).ravel()</code>.
+</div>
+
+<h3>4.4 Per-<span class="sv-ab">abs_bound</span></h3>
+<div class="step"><span class="step-num">①</span>
+  <span class="sv-quant">Quantize</span> joint sensor values and residuals with <span class="sv-ab">abs_bound</span>.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong><span class="sv-cr">CR</span> = (2 × n_3D_ds × 4) / total_bytes</strong> — numerator is ×2 because two fields jointly compressed.
+</div>
+<div class="step"><span class="step-num">③</span>
+  Metrics on <span class="sv-level">LEVEL</span> slice of field 0 (CLOUDf) and field 1 (QVAPORf), stored separately in CSV.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>5 — DEIM-2D (per-level 2D SVD)</h2>
+<p><strong>Key difference from T-DEIM:</strong> SVD computed on the 2D spatial snapshot matrix (n_L × n_2D) → modes are purely spatial; sensors observe within a single 2D slice. Model is 100× smaller than T-DEIM.</p>
+
+<h3>5.1 Offline</h3>
+<div class="step"><span class="step-num">①</span>
+  <strong>Downsample:</strong> <code>data_ds</code> → (100, 50, 50).
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>2D snapshot SVD:</strong> <code>F = (data_ds − mean).reshape(n_L, n_2D)</code>. SVD of F → right singular vectors <code>V</code> shape (n_2D, n_2D). These are the 2D spatial modes.
+</div>
+
+<h3>5.2 Per-<span class="sv-k">k</span></h3>
+<div class="step"><span class="step-num">①</span>
+  <code>Phi_k = V[:, :k]</code> — top-k 2D spatial modes, shape (n_2D, k).
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Q-DEIM sensor placement:</strong> QR with pivoting on <code>Phi_k.T</code> → k sensor locations within the 2D spatial grid. Same k sensors used for every level.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong><span class="sv-model">Model bytes:</span></strong> compress_f16(Phi_k) + compress_i32(sensors) + compress_f32(mean).
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Read sensor values (exact, no quantization):</strong> <code>all_sv[lvl] = data_ds[lvl].ravel()[sensors]</code> for each level → shape (n_L, k). Stored as float16 → <code>sv_enc_exact</code>.
+</div>
+<div class="note">Sensors stored exact (float16) rather than quantized, because DEIM interpolates exactly at sensor locations — the residual at sensors is exactly zero. Quantizing sensors would inject artificial error into the solve.</div>
+<div class="step"><span class="step-num">⑤</span>
+  <strong>Reconstruct (once per k):</strong> For each level, solve <code>A · c = sv[lvl]</code> where <code>A = Phi_k[sensors, :]</code>. Then <code>recon[lvl] = Phi_k · c + mean</code>.
+</div>
+<div class="step"><span class="step-num">⑥</span>
+  <code>resid = (data_ds − recon_ds).ravel()</code>.
+</div>
+
+<h3>5.3 Per-<span class="sv-ab">abs_bound</span></h3>
+<div class="step"><span class="step-num">①</span>
+  <span class="sv-quant">Quantize residuals</span> with <span class="sv-ab">abs_bound</span> and <span class="sv-nb">NUM_BINS=65536</span>.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <span class="sv-cr">CR</span> and CR_no_model computed same as T-DEIM. Metrics on <span class="sv-level">LEVEL</span> slice.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>6 — Kriging-2D (per-level GP, d=1)</h2>
+<p><strong>Key difference from DEIM-2D:</strong> uses a Gaussian Process (Matérn-3/2 kernel) instead of linear modes. Sensor placement via RPCholesky / GKS. No basis matrix to store — model is the kernel hyperparameters + Cholesky of the sensor kernel matrix.</p>
+
+<h3>6.1 Offline</h3>
+<div class="step"><span class="step-num">①</span>
+  <strong>Downsample</strong> → (100, 50, 50). Grid coords normalized to [0,1]².
+</div>
+<div class="step"><span class="step-num">②</span>
+  <strong>Train split:</strong> 70% of levels used to fit hyperparameters.
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong>Fit hyperparameters</strong> (<code>ls</code>, <code>var</code>) via joint MLE on a coarse <code>HP_DS=5</code> subgrid (10×10 = 100 points). Uses 3 random restarts for robustness.
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Max-<span class="sv-k">k</span> sensor placement (GKS):</strong> greedy kernel column selection on the full 2500-point grid. First k columns give the most informative sensor locations.
+</div>
+
+<h3>6.2 Per-<span class="sv-k">k</span></h3>
+<div class="step"><span class="step-num">①</span>
+  Take first <span class="sv-k">k</span> sensors <code>s_k</code>. Assemble <code>K_ss_k</code> (k×k sensor kernel) + noise diagonal.
+</div>
+<div class="step"><span class="step-num">②</span>
+  Cholesky: <code>L_k = cholesky(K_ss_k + σ²I)</code>. Assemble cross-covariance <code>K_Xs</code> shape (n_2D, k).
+</div>
+<div class="step"><span class="step-num">③</span>
+  <strong><span class="sv-model">Model bytes:</span></strong> compress_f16(K_Xs) + compress_f32(L_k) + compress_f32(train_mean) + compress_f32(train_std) + compress_f16(hyperparams) + compress_i32(sensor_indices).
+</div>
+<div class="step"><span class="step-num">④</span>
+  <strong>Read sensor values (exact):</strong> <code>all_sv[lvl] = data_ds[lvl].ravel()[s_k]</code>. Stored as float16 → <code>sv_enc_exact</code>.
+</div>
+<div class="step"><span class="step-num">⑤</span>
+  <strong>Reconstruct (once per k, hoisted out of abs_bound loop):</strong>
+  For each level: normalize sensors → <code>alpha = L_k \ y_norm</code> → <code>mu = B[0,0] × K_Xs × alpha</code> → denormalize → <code>recon_ds[lvl]</code>.
+</div>
+<div class="step"><span class="step-num">⑥</span>
+  <code>resid = (data_ds − recon_ds).ravel()</code>.
+</div>
+
+<h3>6.3 Per-<span class="sv-ab">abs_bound</span></h3>
+<div class="step"><span class="step-num">①</span>
+  <span class="sv-quant">Quantize residuals</span> with <span class="sv-ab">abs_bound</span>.
+</div>
+<div class="step"><span class="step-num">②</span>
+  <span class="sv-cr">CR</span> and CR_no_model identical formula to DEIM-2D. Metrics on <span class="sv-level">LEVEL</span> slice.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>7 — Config Toggles Reference</h2>
+<table>
+  <tr><th>Toggle</th><th>Type</th><th>Effect</th></tr>
+  <tr><td><code>PLOTS_ONLY</code></td><td>bool</td><td>Skip all compression; reload CSV and regenerate plots only.</td></tr>
+  <tr><td><code>RUN_TDEIM</code></td><td>bool</td><td>Skip T-DEIM (slow; saves ~20 min per run).</td></tr>
+  <tr><td><code>RUN_MULTIGP</code></td><td>bool</td><td>Skip MultiGP (requires QVAPORf48.bin.f32).</td></tr>
+  <tr><td><span class="sv-ds"><code>DS</code></span></td><td>int</td><td>Spatial downsampling factor. DS=10 → 50×50/level.</td></tr>
+  <tr><td><span class="sv-level"><code>LEVEL</code></span></td><td>int</td><td>Z-slice index used for PSNR/SSIM. Default 50 (mid-hurricane).</td></tr>
+  <tr><td><span class="sv-ab"><code>ABS_BOUNDS</code></span></td><td>array</td><td>Residual error bound sweep for SZ2, T-DEIM, DEIM-2D, Kriging-2D.</td></tr>
+  <tr><td><span class="sv-ab"><code>ZFP_ABS_BOUNDS</code></span></td><td>array</td><td>Same values, used for ZFP fixed-accuracy sweep.</td></tr>
+  <tr><td><span class="sv-k"><code>TDEIM_K_VALUES</code></span></td><td>list</td><td>k values swept for T-DEIM.</td></tr>
+  <tr><td><span class="sv-k"><code>DEIM2D_K_VALUES</code></span></td><td>list</td><td>k values for DEIM-2D (max useful = min(n_L, n_2D) = 100).</td></tr>
+  <tr><td><span class="sv-k"><code>KRIG2D_K_VALUES</code></span></td><td>list</td><td>k values for Kriging-2D (no n_L cap; more sensors always helps GP).</td></tr>
+  <tr><td><span class="sv-k"><code>MULTIGP_K_VALUES</code></span></td><td>list</td><td>k values for MultiGP.</td></tr>
+  <tr><td><span class="sv-nb"><code>NUM_BINS</code></span></td><td>int</td><td>Quantization bins. Fixed at 65536 to match SZ2.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<h2>8 — What Each Output Plot Shows</h2>
+<table>
+  <tr><th>File</th><th>X-axis</th><th>Y-axis</th><th>Lines</th></tr>
+  <tr><td><code>rd_psnr_cr_*.png</code></td><td>CR (log)</td><td>PSNR (dB)</td><td>Solid = SZ2/ZFP. Dashed = Pareto envelope over k. Dotted = CR_no_model.</td></tr>
+  <tr><td><code>rd_ssim_cr_*.png</code></td><td>CR (log)</td><td>SSIM</td><td>Same as above.</td></tr>
+  <tr><td><code>rd_psnr_bpv_*.png</code></td><td>bpv = 32/CR (log)</td><td>PSNR (dB)</td><td>Standard RD curve; lower bpv = better compression.</td></tr>
+  <tr><td><code>rd_ssim_bpv_*.png</code></td><td>bpv</td><td>SSIM</td><td>Same.</td></tr>
+  <tr><td><code>rd_psnr_absbound_*.png</code></td><td>abs_bound (log, inverted)</td><td>PSNR</td><td>Quality at matched error tolerance. Our methods: best PSNR over all k at each abs_bound.</td></tr>
+  <tr><td><code>rd_ssim_absbound_*.png</code></td><td>abs_bound (log, inverted)</td><td>SSIM</td><td>Same.</td></tr>
+  <tr><td><code>rd_timing_*.png</code></td><td>CR (log)</td><td>Online comp. time (log)</td><td>One point per k at median abs_bound. Shows k–CR–time tradeoff.</td></tr>
+  <tr><td><code>rd_budget_breakdown_*.png</code></td><td>k</td><td>MB</td><td>Stacked bars: model (blue) / sensor values (orange) / residuals (green). Shows why large k can reduce total data bytes.</td></tr>
+</table>
+
+<hr>
+<p style="font-size:0.8em;color:#888">Generated 2026-07-16 from rate_distortion_comparison.py v2.</p>
+</body>
+</html>

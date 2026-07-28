@@ -1,0 +1,42 @@
+# Raw ISABEL / dataset volumes (large binary data, not code)
+100x500x500/
+gpoed-code-python/
+*.bin.f32
+*.nc
+
+# Personal / sensitive documents (benefits, offer letter, onboarding, etc.)
+admin/
+mug comp/
+
+# Generated plots and figures
+*.png
+*.jpg
+*.jpeg
+
+# Generated model artifacts and result tables
+*.npz
+rd_results*.csv
+kriging_hyperparams*.txt
+
+# Python cache / notebook checkpoints / OS junk
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.synctex.gz
+*.toc
+
+# Presentation / poster source and output files
+*.tex
+*.pptx
+SassyPresentation.pdf
+chen.jessie.pdf
+compress_to_impress.pdf
+slides_*.pdf
