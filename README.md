@@ -1269,7 +1269,7 @@ Saves `fig8_cloud_slice{LEVEL}_cr{TARGET_CR}.png` and
 > Data provided by Kelvin K. Droegemeier, Ming Xue, and the Center for
 > Analysis and Prediction of Storms (CAPS), University of Oklahoma, and by
 > the National Center for Atmospheric Research.
-> Available at: https://ieeexplore.ieee.org/document/1566621
+> Available at: [https://ieeexplore.ieee.org/document/1566621](https://sdrbench.github.io/)
 
 The dataset is a numerical simulation of Hurricane Isabel (September 2003)
 produced by the Weather Research and Forecast (WRF) model. The full volume is
