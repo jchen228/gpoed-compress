@@ -14,6 +14,9 @@ to an actively-evolving progressive/iterative GP compressor. See each
 script's entry below for what it does, how to run it, and its top-of-file
 configuration.
 
+NOTE: This readme file and the code contained in this GitHub repository were
+generated using Claude.
+
 ---
 
 ## Installation
