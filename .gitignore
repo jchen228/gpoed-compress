@@ -8,6 +8,10 @@ gpoed-code-python/
 admin/
 mug comp/
 
+# Cloned external tutorial repo (own .git, unrelated to this project — keep
+# locally for reference, don't ship it in this repo)
+fz_tutorial/
+
 # Generated plots and figures
 *.png
 *.jpg

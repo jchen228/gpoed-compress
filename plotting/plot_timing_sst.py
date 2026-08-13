@@ -21,7 +21,7 @@ import matplotlib.patches as mpatches
 from collections import defaultdict
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ARGONNE  = Path(__file__).resolve().parent
+ARGONNE  = Path(__file__).resolve().parent.parent
 CSV_PATH = ARGONNE / "rd_results_SST.csv"
 OUT_PATH = ARGONNE / "timing_SST.png"
 DPI      = 150

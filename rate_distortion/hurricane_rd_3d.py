@@ -36,7 +36,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ARGONNE  = Path(__file__).resolve().parent
+ARGONNE  = Path(__file__).resolve().parent.parent
 TC_FILE  = ARGONNE / "100x500x500" / "TCf48.bin.f32"
 # Reuse existing 2-D checkpoint for spatial hyperparams/sensors
 CKPT_2D  = ARGONNE / "kriging_ckpt_Hurricane_N400.npz"

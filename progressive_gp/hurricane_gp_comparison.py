@@ -30,7 +30,7 @@ from scipy.linalg import qr as scipy_qr
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_DIR  = ARGONNE / "100x500x500"
 DATA_FILE = DATA_DIR / "Uf48.bin.f32"
 
@@ -882,9 +882,7 @@ def plot_rd_curves(gp_pts: list[dict], sz3_pts: list[dict], mode: str) -> None:
     sz3_rmse = [p['rmse']            for p in sz3_pts_s]
     sz3_eb   = [p['eb']              for p in sz3_pts_s]
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 12))
-    for ax in axes:
-        ax.set_aspect('auto')   # let subplots_adjust control layout; square via figsize
+    fig, axes = plt.subplots(1, 3, figsize=(18, 9))
     mode_label = '2D Slice-by-Slice GP' if mode == '2d' else '3D GP'
     k_label = f"k={K_PER_ROUND_2D}/slice" if mode == '2d' else f"k={K_PER_ROUND_3D}"
     fig.suptitle(
@@ -934,7 +932,8 @@ def plot_rd_curves(gp_pts: list[dict], sz3_pts: list[dict], mode: str) -> None:
         ax.legend(fontsize=10)
         ax.grid(True, alpha=0.25, ls='--')
         ax.spines[['top', 'right']].set_visible(False)
-        ax.margins(y=0.25)   # extra headroom above/below for staggered labels
+        ax.margins(y=0.25)
+        ax.set_box_aspect(1)   # force square axis box
 
     # Summary table
     sz3_by_eb  = {p['eb']: p for p in sz3_pts}
@@ -958,8 +957,8 @@ def plot_rd_curves(gp_pts: list[dict], sz3_pts: list[dict], mode: str) -> None:
             f"{sz3.get('rmse','n/a'):.5f}" if sz3 else 'n/a',
         ])
 
-    fig.subplots_adjust(bottom=0.22, top=0.93, wspace=0.30)
-    tbl_ax = fig.add_axes([0.05, 0.01, 0.9, 0.17])
+    fig.subplots_adjust(bottom=0.28, top=0.90, wspace=0.35)
+    tbl_ax = fig.add_axes([0.05, 0.01, 0.9, 0.22])
     tbl_ax.axis('off')
     t = tbl_ax.table(cellText=rows, colLabels=col_labels,
                      cellLoc='center', loc='center')

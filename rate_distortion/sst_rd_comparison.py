@@ -56,7 +56,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.colors import Normalize
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_PATH = ARGONNE.parent / "gpoed-code-python" / "sst.wkmean.1990-present.nc"
 LP_MGP    = ARGONNE / "lp_multigp_compressor.py"   # Matérn kernel helpers (read-only ref)
 

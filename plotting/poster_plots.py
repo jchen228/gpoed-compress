@@ -34,10 +34,10 @@ from skimage.metrics import structural_similarity
 import libpressio
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ARGONNE    = Path(__file__).parent
+ARGONNE    = Path(__file__).parent.parent
 DATA_DIR   = ARGONNE / "100x500x500"
-DATA_PATH  = DATA_DIR / "Uf48.bin.f32"
-DATA_PATH2 = DATA_DIR / "Vf48.bin.f32"
+DATA_PATH  = DATA_DIR / "CLOUDf48.bin.f32"
+DATA_PATH2 = DATA_DIR / "QVAPORf48.bin.f32"
 SHAPE      = (100, 500, 500)
 FIELD_TAG  = DATA_PATH.stem.replace(".bin", "").replace(".f32", "")
 LEVEL      = 50          # z-slice to visualise
@@ -283,7 +283,7 @@ def recon_kriging2d(data_ds, k, abs_bound):
     data_nd    = data_ds.reshape(n_L, n, 1)
     train_mean = data_nd.mean(axis=0)
     train_std  = data_nd.std(axis=0)
-    zero_std_mask = (train_std[:, 0] < 1e-10)   # locations with zero variance (e.g. U=0)
+    zero_std_mask = (train_std[:, 0] < 1e-10)   # locations with zero variance (e.g. cloud=0)
     train_std_safe = np.where(train_std < 1e-10, 1.0, train_std)
     Y_train    = [(data_nd[l] - train_mean) / train_std_safe for l in range(n_L)]
 
@@ -545,7 +545,7 @@ def plot_reconstruction_comparison(data_ds, data2_ds, by_method, target_cr=TARGE
 
     fig.suptitle(
         f"Reconstruction comparison at matched CR ≈ {target_cr:.0f}×  |  "
-        f"Uf48  level {LEVEL}  (downsampled {DS}×)",
+        f"CLOUDf48  level {LEVEL}  (downsampled {DS}×)",
         fontsize=13, y=1.01)
 
     out = ARGONNE / f"poster_reconstruction_{FIELD_TAG}.png"
@@ -602,7 +602,7 @@ def plot_sensor_maps(data_ds, sensors_by_method, by_method, target_cr=TARGET_CR)
         ax.set_ylabel("y (downsampled)")
         ax.legend(loc="upper right", fontsize=9)
 
-    fig.suptitle(f"Sensor placement — Uf48 level {LEVEL}", fontsize=13)
+    fig.suptitle(f"Sensor placement — CLOUDf48 level {LEVEL}", fontsize=13)
     plt.tight_layout()
     out = ARGONNE / f"poster_sensor_map_{FIELD_TAG}.png"
     fig.savefig(out, dpi=DPI, bbox_inches="tight")
@@ -693,7 +693,7 @@ def plot_rd_curves(by_method, metric_key, ylabel, fname_suffix):
               ncol=3, handlelength=1.8, columnspacing=1.0,
               framealpha=0.9, borderpad=0.6)
     ax.grid(True, which="both", alpha=0.2, linestyle="--")
-    ax.set_title(f"Rate–Distortion  —  Uf48  (level {LEVEL})", fontsize=13)
+    ax.set_title(f"Rate–Distortion  —  CLOUDf48  (level {LEVEL})", fontsize=13)
 
     # ── Zoom inset: bottom-left corner with dashed rectangle on main plot ─────
     if metric_key == "psnr":
@@ -1027,7 +1027,7 @@ def plot_fig3_big_panel(data_ds, data2_ds, by_method):
 
     # (1,2) Combined overlapping histogram — pre-quantization spatial prediction error
     # All methods evaluated at HIST_K=10 so residual scales are comparable across
-    # methods (matches rd_residual_histogram_Uf48.png which used k=10 for all).
+    # methods (matches rd_residual_histogram_CLOUDf48.png which used k=10 for all).
     ax_hist = fig.add_subplot(gs[1, 2])
     HIST_K  = 10                             # fixed k for histogram (comparable scales)
     HIST_AB = 0.01                           # shared binning scale (matches reference)

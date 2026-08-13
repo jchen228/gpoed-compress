@@ -62,7 +62,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.colors import Normalize
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_DIR  = ARGONNE / "100x500x500"
 TC_FILE   = DATA_DIR / "TCf48.bin.f32"
 

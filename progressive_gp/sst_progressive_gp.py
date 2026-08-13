@@ -54,7 +54,7 @@ from scipy.linalg import qr as scipy_qr
 # PATHS & CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_PATH = ARGONNE.parent / "gpoed-code-python" / "sst.wkmean.1990-present.nc"
 MASK_PATH = DATA_PATH.parent / "lsmask.nc"
 

@@ -23,7 +23,7 @@ import scipy.signal
 from scipy.ndimage import uniform_filter
 
 # ── Paths — adjust if running from a different directory ─────────────────────
-ARGONNE   = Path(__file__).parent
+ARGONNE   = Path(__file__).parent.parent
 DATA_PATH = ARGONNE / "sst.nc"          # same file as main script
 FIELD_TAG = "SST"
 N_TRAIN   = 1727

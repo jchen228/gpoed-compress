@@ -49,7 +49,7 @@ from skimage.metrics import structural_similarity
 from scipy.linalg import qr as scipy_qr, cho_factor, cho_solve
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ARGONNE     = Path(__file__).parent
+ARGONNE     = Path(__file__).parent.parent
 DATA_DIR    = ARGONNE / "100x500x500"   # full Isabel dataset
 DATA_PATH   = DATA_DIR / "Uf48.bin.f32"    # cloud liquid water
 DATA_PATH2  = DATA_DIR / "Vf48.bin.f32"   # water vapor (field 2, for MultiGP d=2)

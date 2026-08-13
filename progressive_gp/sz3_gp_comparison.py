@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARGONNE = Path(__file__).resolve().parent
+ARGONNE = Path(__file__).resolve().parent.parent
 
 # Set USE_2D = True to load the 2D slice-by-slice GP checkpoint.
 USE_2D = True

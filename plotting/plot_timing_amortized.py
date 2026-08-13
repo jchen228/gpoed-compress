@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ARGONNE  = Path(__file__).resolve().parent
+ARGONNE  = Path(__file__).resolve().parent.parent
 CSV_PATH = ARGONNE / "rd_results_Hurricane.csv"
 OUT_PATH = ARGONNE / "timing_amortized_Hurricane.png"
 DPI      = 150

@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from scipy.linalg import cho_factor, cho_solve, qr
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_PATH = ARGONNE.parent / "gpoed-code-python" / "sst.wkmean.1990-present.nc"
 
 N_SNAPSHOTS = 10          # number of snapshots to analyse (set to 1 for quick run)

@@ -42,7 +42,7 @@ from scipy.linalg import qr as scipy_qr
 # PATHS & CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARGONNE   = Path(__file__).resolve().parent
+ARGONNE   = Path(__file__).resolve().parent.parent
 DATA_DIR  = ARGONNE / "100x500x500"
 DATA_FILE = DATA_DIR / "Uf48.bin.f32"
 
