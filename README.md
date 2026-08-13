@@ -14,6 +14,9 @@ to an actively-evolving progressive/iterative GP compressor. See each
 script's entry below for what it does, how to run it, and its top-of-file
 configuration.
 
+NOTE: This readme file and the code contained in this GitHub repository were
+generated using Claude.
+
 ---
 
 ## Installation
@@ -1339,7 +1342,7 @@ Spack staging path differs.
 > Data provided by Kelvin K. Droegemeier, Ming Xue, and the Center for
 > Analysis and Prediction of Storms (CAPS), University of Oklahoma, and by
 > the National Center for Atmospheric Research.
-> Available at: https://ieeexplore.ieee.org/document/1566621
+> Available at: [https://ieeexplore.ieee.org/document/1566621](https://sdrbench.github.io/)
 
 The dataset is a numerical simulation of Hurricane Isabel (September 2003)
 produced by the Weather Research and Forecast (WRF) model. The full volume is
