@@ -1,0 +1,35 @@
+# Core dependencies used across most scripts in this repo.
+# Install with: pip install -r requirements.txt
+
+numpy
+scipy
+matplotlib
+scikit-learn      # randomized_svd (kriging_hurricane.py, splitgp_hurricane.py, lp_kriging_compressor.py)
+scikit-image      # SSIM (rate_distortion_comparison.py, sst_rd_comparison.py, poster_plots*.py, replicate_fig*.py)
+Pillow            # GIF export fallback (hurricane_progressive_gp.py)
+zstandard         # residual/model compression (rate_distortion_comparison.py, sst_rd_comparison.py, hurricane_rd_*.py, poster_plots*.py)
+netCDF4           # SST dataset I/O (sst_rd_comparison.py, sst_progressive_gp.py, lorenzo_vs_global_diagnostic.py, residual_autocorr_diagnostic.py)
+
+# ── Not installable via pip — build/obtain separately ──────────────────────
+#
+# libpressio  — required by: rate_distortion_comparison.py, sst_rd_comparison.py,
+#               hurricane_rd_comparison.py, hurricane_rd_3d.py, poster_plots.py,
+#               poster_plots_wind.py, replicate_fig1.py, replicate_fig8.py,
+#               q2_zfp_vs_sz.py, ex2_comparing_compressors.py.
+#               Build via Spack (see patch_libpressio.py for a macOS SWIG-binding
+#               patch needed on libpressio 0.94.0) or another libpressio-provided
+#               install method. Not on PyPI.
+#
+# SZ3 (standalone binary) — required by: sz3_gp_comparison.py, hurricane_gp_comparison.py.
+#               These call a built `sz3` binary as a subprocess (path is hardcoded
+#               near the top of each file as SZ3_BIN — update it to your local
+#               build location).
+#
+# mpi4py      — required only by: ex2_comparing_compressors.py (run via `mpirun`).
+#               Needs an MPI implementation (e.g. OpenMPI/MPICH) installed first;
+#               `pip install mpi4py` after that.
+#
+# gpoed-code-python — required by: kriging_hurricane.py (rpgks, pivoted_cholesky).
+#               A sibling package expected on `sys.path` (default hardcoded path:
+#               /Users/jchen228/Desktop/gpoed-code-python) — not a pip package,
+#               clone/vendor it alongside this repo and update the path.

@@ -14,8 +14,10 @@ CR = (n_T × ny × nx × 4 bytes) / compressed_bytes.
 | `NUM_BINS` | 65,536 | Quantisation bins (uint16; mirrors SZ2) |
 | `DEIM_K_VALS` | [100, 200, …, 1000] (step 100) | SVD mode counts tested (≤ N_TRAIN) |
 | `KRIG_K_VALS` | [100, 200, …, 1000] (step 100) | GP sensor counts tested |
-| `ABS_BOUNDS` | logspace(−4, −0.5, 8) ≈ [1e-4 … 0.32] °C | L∞ error bound sweep (SZ2/ZFP) |
+| `ABS_BOUNDS` | logspace(−4, −0.5, 8) ≈ [1e-4 … 0.32] °C | Absolute bound sweep (DEIM/Kriging L2 quantizer) |
 | `ABS_BOUNDS_PRED` | ABS_BOUNDS ∪ [0.5, 1.0, 2.0, 5.0] °C | Extended sweep for DEIM/Kriging variants |
+| `REL_BOUNDS` | 2^-10 … 2^-20 (11 pts, ~1e-3 … 1e-6) | SZ2 relative error bound sweep |
+| `ZFP_BOUNDS` | 2^-1 … 2^-13 (13 pts, 0.5 … ~1.2e-4 °C) | ZFP fixed-accuracy sweep (power-of-2 aligned) |
 | `TIME_IDX` | 864 | Snapshot shown in field panels (~July 2006) |
 | `VIZ_K_DEIM` | 100 | k shown in field panel for DEIM methods |
 | `VIZ_K_KRIG` | 100 | k shown in field panel for Kriging methods |
@@ -32,8 +34,8 @@ CR = (n_T × ny × nx × 4 bytes) / compressed_bytes.
 
 | Method | Storage | Error bound type | Notes |
 |--------|---------|-----------------|-------|
-| **SZ2** | slice-by-slice compressed field | L∞ per pixel (`abs_err_bound = ε`) | Lorenzo predictor + Huffman + zstd; excellent CR at tight bounds |
-| **ZFP** | slice-by-slice compressed field | L∞ per pixel (`accuracy = ε`) | Orthogonal transform + fixed-point coding; fast, good CR |
+| **SZ2** | slice-by-slice compressed field | Relative per pixel (`rel_err_bound = r`, fraction of snapshot range) | Lorenzo predictor + Huffman + zstd; relative mode makes bound dataset-agnostic |
+| **ZFP** | slice-by-slice compressed field | Fixed-accuracy (`accuracy = 2^-k`, powers of 2) | Orthogonal transform + fixed-point coding; power-of-2 bounds align with internal exponent grid → monotone CR curve |
 
 ---
 

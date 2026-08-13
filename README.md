@@ -1,8 +1,38 @@
-# Kriging & Sensor Placement — Hurricane Isabel
+# Prediction-Based Lossy Compression — Gaussian Process & DEIM Methods
 
-Gaussian Process interpolation and optimal sensor placement applied to the
-ISABEL hurricane simulation dataset. Extracted and extended from
-`Kriging-DEIM.ipynb`.
+Research code exploring whether global, prediction-based reconstruction
+methods (Gaussian Process / Kriging regression and DEIM low-rank bases) can
+outperform general-purpose scientific-data compressors (SZ2, SZ3, ZFP) when
+used as a predictor ahead of quantization and entropy coding. Applied to two
+datasets: the ISABEL hurricane simulation (3D wind/temperature/cloud fields)
+and NOAA OI SST V2 (weekly sea-surface temperature). Originally extracted
+and extended from `Kriging-DEIM.ipynb`.
+
+Scripts range from standalone reconstruction demos (Kriging, DEIM — no
+baseline comparison) to full rate-distortion benchmarks against SZ2/ZFP/SZ3,
+to an actively-evolving progressive/iterative GP compressor. See each
+script's entry below for what it does, how to run it, and its top-of-file
+configuration.
+
+---
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+This covers the pip-installable dependencies (NumPy, SciPy, Matplotlib,
+scikit-learn, scikit-image, Pillow, zstandard, netCDF4). A handful of
+scripts additionally need things that aren't on PyPI — a `libpressio` build,
+a built `sz3` binary, an MPI implementation for `mpi4py`, and the sibling
+`gpoed-code-python` package — see the bottom of `requirements.txt` for
+details on each, and each script's **Usage** section below for which
+scripts need which.
+
+Data files (`*.bin.f32` hurricane volumes under `100x500x500/`, and the SST
+NetCDF files) are not included in this repository — see
+[Datasets](#datasets) below for where to get them and expected paths.
 
 ---
 
@@ -329,6 +359,181 @@ residuals per variable, same binning scheme as `deim_hurricane_v2.py`).
 
 ---
 
+### `hurricane_progressive_gp.py`
+
+Progressive/iterative 3D GP compression on the ISABEL U-wind field: instead of
+placing all sensors in one shot, the domain is compressed in rounds, each
+round sensing only the points that are still poorly predicted. Each round:
+(1) **sense** — places `K_PER_ROUND` new sensors from the remaining
+candidate pool using `SENSOR_STRATEGY`; (2) **predict** — fit a GP on all
+accumulated sensor values and predict everywhere; (3) **compress** — points
+where `|pred − true| < ACCEPT_BOUND` (`ACCEPT_BINS × ERROR_BOUND`) are marked
+done and removed from the pool; (4) **repeat** for `N_ROUNDS` rounds. A final
+decompression test collects all sensors from all rounds and runs one GP over
+the full domain to simulate what a decoder reconstructs.
+
+Sensor placement supports four strategies (`SENSOR_STRATEGY`): `'rpgks'`
+(randomized-pivoted GKS / mutual-information maximisation, geometry-only);
+`'max_residual'` (top-k largest current GP error); `'rpgks_residual'` (rpgks
+restricted to the worst `RESID_PERCENTILE`% of candidates by error); and
+`'hybrid'` (rpgks for the first `N_RPGKS_ROUNDS` rounds for broad coverage,
+then `rpgks_residual` to collapse the error tails). An optional `USE_KRONECKER`
+mode places sensors on a tensor-product `(z-levels × xy-positions)` grid with
+a separable kernel, trading sensor-placement freedom for much cheaper
+prediction at large `k`.
+
+**Usage**
+
+```bash
+python3 hurricane_progressive_gp.py
+```
+
+Fits/caches 3D kernel hyperparameters to `pgp_hyperparams_ds{DOWNSAMPLE}.pkl`.
+Produces panel and histogram figures per round (a static figure if
+`N_ROUNDS <= 3`, otherwise per-round video frames stitched to MP4/GIF, plus
+standalone `.gif` copies), a 3D volumetric comparison of the final
+reconstruction vs. the true field, and a pickled checkpoint
+(`pgp_checkpoint_R{N_ROUNDS}_k{K_PER_ROUND}_eb{ERROR_BOUND}_ab{ACCEPT_BINS}_ds{DOWNSAMPLE}...pkl`)
+consumed by `sz3_gp_comparison.py` / `hurricane_gp_comparison.py`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_ROUNDS` | `20` | Number of progressive sensing rounds |
+| `K_PER_ROUND` | `250` | Sensors selected per round |
+| `ERROR_BOUND` | `0.01` | Quantisation bin half-width (m/s); SZ2 bin width = 2×EB |
+| `ACCEPT_BINS` | `10` | Central EB-bins counted as "compressed" (`ACCEPT_BOUND = ACCEPT_BINS × ERROR_BOUND`) |
+| `DOWNSAMPLE` | `3` (overridden to `10` by `QUICK_TEST`) | Spatial downsampling factor |
+| `ACCUMULATE` | `True` | `True` → sensors accumulate across rounds; `False` → fresh `k` sensors each round |
+| `SENSOR_STRATEGY` | `'hybrid'` | `'rpgks'`, `'max_residual'`, `'rpgks_residual'`, or `'hybrid'` |
+| `N_RPGKS_ROUNDS` | `1` | (hybrid only) rounds of rpgks before switching to `rpgks_residual` |
+| `RESID_PERCENTILE` | `25` | (rpgks_residual/hybrid) rpgks draws from the worst X% of candidates by `\|error\|` |
+| `USE_KRONECKER` | `False` | `True` → separable tensor-grid GP (fast, sensors constrained to xy-plane grid); `False` → free 3D rpgks |
+| `K_Z_PER_ROUND` | `4` | (Kronecker only) z-levels added per round |
+| `QUICK_TEST` | `True` | `True` → forces `DOWNSAMPLE = 10` (250k points, ~20–40s/round) for fast iteration |
+
+---
+
+### `hurricane_progressive_gp_2d.py`
+
+A slice-by-slice variant of `hurricane_progressive_gp.py`: instead of one 3D
+GP over the whole volume, each horizontal z-slice is treated as an
+independent 2D progressive-GP problem (2D anisotropic Matérn kernel over
+`(y, x)` only, same sense→predict→compress round loop as the 3D script,
+run separately per slice). Rationale (from the module docstring): with a
+fixed sensor budget spread across `NZ` slices, the 3D approach gives each
+slice only ~2–3 sensors; the 2D approach dedicates `K_PER_ROUND_2D` sensors
+*per slice per round*, giving much denser in-plane coverage at the cost of
+ignoring vertical (z) correlation entirely. Saves checkpoints in the same
+pickle format as `hurricane_progressive_gp.py` so `sz3_gp_comparison.py` can
+load and compare either one (`USE_2D` flag).
+
+**Usage**
+
+```bash
+python3 hurricane_progressive_gp_2d.py
+```
+
+Saves a checkpoint (`pgp2d_checkpoint_R{N_ROUNDS}_k{K_PER_ROUND_2D}_eb{ERROR_BOUND}_ab{ACCEPT_BINS}_ds{DOWNSAMPLE}_zskip{Z_SKIP_BOTTOM}.pkl`)
+and `progressive_gp_2d_histograms.png`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_ROUNDS` | `10` | Progressive rounds per slice |
+| `K_PER_ROUND_2D` | `10` | Sensors per slice per round (total sensors = `K_PER_ROUND_2D × NZ × N_ROUNDS`) |
+| `ERROR_BOUND` | `0.01` | Quantiser bin half-width (m/s) |
+| `ACCEPT_BINS` | `10` | Voxels with `\|error\| < ACCEPT_BINS × EB` are compressed |
+| `DOWNSAMPLE` | `10` | Spatial downsampling |
+| `SENSOR_STRATEGY` | `'hybrid'` | Same options as the 3D script |
+| `Z_SKIP_BOTTOM` | `0` | Number of bottom z-levels excluded (`0` = use all 100) |
+| `KERNEL_TYPE` | `'matern12'` | `'matern52'`, `'matern32'`, or `'matern12'` (2D only, no z component) |
+| `LS_XY` | `0.15` | Horizontal correlation length in `[0,1]` coords |
+
+---
+
+### `hurricane_gp_comparison.py`
+
+A unified successor to `hurricane_progressive_gp.py` / `hurricane_progressive_gp_2d.py`:
+one script that runs *either* mode (`MODE = '2d'` or `'3d'`) and directly
+sweeps a full rate-distortion curve against SZ3 (`RUN_MODE = 'rd'` sweeps
+`EB_VALUES`; `RUN_MODE = 'ls'` instead sweeps `LS_XY_VALUES` at a fixed EB to
+tune the lengthscale first). Adds target-based stopping in place of a fixed
+round count: `TARGET_CR` / `TARGET_PSNR` (stop once the estimated
+compression ratio or PSNR is reached) or `TARGET_BEAT_SZ3` (run SZ3 first,
+then keep adding rounds until GP PSNR meets or beats it), up to `MAX_ROUNDS`.
+Also introduces `SENSOR_STORAGE`, which controls how sensor values
+themselves are stored/represented (`'float32'`, `'float16'`, or
+`'eb_quant'` — entropy-coded EB-quantised, matching encoder/decoder
+representations exactly). GP runs are cached per `(mode, EB)` checkpoint and
+reloaded rather than recomputed on subsequent runs.
+
+**Usage**
+
+```bash
+python3 hurricane_gp_comparison.py
+```
+
+Saves `rd_curve_{MODE}.png` (RD sweep) or `ls_sweep_{MODE}.png` (lengthscale
+sweep), depending on `RUN_MODE`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MODE` | `'2d'` | `'2d'` slice-by-slice or `'3d'` full-volume GP |
+| `RUN_MODE` | `'rd'` | `'rd'` sweeps `EB_VALUES`; `'ls'` sweeps `LS_XY_VALUES` at fixed `LS_EB` |
+| `EB_VALUES` | `[0.005, 0.01, 0.02, 0.05, 0.1]` | Error bounds swept in RD mode |
+| `TARGET_CR` / `TARGET_PSNR` | `None` / `None` | Stop rounds early once reached (`None` → use fixed `N_ROUNDS`) |
+| `TARGET_BEAT_SZ3` | `False` | `True` → run SZ3 first, use its PSNR as the per-EB stopping target |
+| `MAX_ROUNDS` | `30` | Hard cap when using target-based stopping |
+| `N_ROUNDS` | `10` | Used only when all targets are `None` |
+| `SENSOR_STRATEGY` | `'hybrid'` | Same options as `hurricane_progressive_gp.py` |
+| `SENSOR_STORAGE` | `'eb_quant'` | `'float32'`, `'float16'`, or `'eb_quant'` — how sensor values are represented for both encode and decode |
+| `DOWNSAMPLE` | `10` | Spatial downsampling |
+| `KERNEL_TYPE` | `'matern52'` | `'matern52'`, `'matern32'`, or `'matern12'` |
+
+---
+
+### `sz3_gp_comparison.py`
+
+Loads a progressive-GP checkpoint (from either `hurricane_progressive_gp.py`
+or `hurricane_progressive_gp_2d.py`, via the `USE_2D` flag) and builds a
+rate-distortion curve against SZ3, run as an external binary on the same
+volume. Sensor positions are fixed from the checkpoint; for each `EB` in
+`EB_VALUES`, the GP's final-round predictions are re-quantized at that `EB`
+(`quantize_sz2`: bin width `2×EB`, unbounded integer bin index so every
+point's reconstruction error is bounded by construction — no separate
+outlier/raw-storage path is needed since the bin index itself absorbs
+arbitrarily large residuals) — no GP re-run needed per `EB`. Reports bit
+rate (sensor overhead + entropy of the quantized bins), PSNR, and RMSE for
+both methods at each `EB`.
+
+**Usage**
+
+```bash
+python3 sz3_gp_comparison.py
+```
+
+Requires a checkpoint from `hurricane_progressive_gp.py` /
+`hurricane_progressive_gp_2d.py` to already exist, and the `SZ3_BIN` path
+(hardcoded near the top of the file) to point at a built SZ3 binary. Saves
+`sz3_gp_rd_curve.png`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `USE_2D` | `True` | `True` → load a 2D slice-by-slice checkpoint; `False` → load a 3D checkpoint |
+| `CHECKPOINT_FILE` | *(path, depends on `USE_2D`)* | Which progressive-GP checkpoint to compare |
+| `SZ3_BIN` | *(local path)* | Path to a built SZ3 binary |
+| `EB_VALUES` | `[0.005, 0.01, 0.02, 0.05, 0.1]` | Error bounds swept for the RD curve |
+| `BITS_PER_SENSOR` | `64` | Bits charged per stored sensor (`uint32` index + `float32` value) |
+
+---
+
 ### `lp_deim_compressor.py`
 
 A `libpressio` **external compressor** plugin implementing Q-DEIM (Drmač &
@@ -496,6 +701,84 @@ rate-distortion plots (PSNR/SSIM vs. compression ratio) and
 
 ---
 
+### `hurricane_rd_comparison.py`
+
+A four-method rate-distortion comparison focused on the ISABEL TC
+(temperature) field, structured like `rate_distortion_comparison.py` but
+with no land mask (all 500×500 pixels active) and no vertical/T-DEIM
+dimension exploited: SZ2 and ZFP (2D slice-wise), DEIM-2D+SZ2 (spatial SVD
+basis, residual coded with SZ2), and Kriging-2D+SZ2 (spatial Matérn-3/2 GP
+with RPCholesky sensor placement, residual coded with SZ2). Each model
+trains once on all 100 vertical levels, then is evaluated per-level: predict
+from `k` sensors, compress the residual with SZ2. MultiGP (LMC over the
+U/V/W wind fields, reusing `multigp_hurricane.py` functions) is run and
+plotted separately alongside the four TC methods. GP hyperparameters are
+fit by MLE on a random subsample of 2000 pixels.
+
+**Usage**
+
+```bash
+python3 hurricane_rd_comparison.py
+```
+
+Reads `100x500x500/TCf48.bin.f32` (and `Uf48.bin.f32`/`Vf48.bin.f32`/
+`Wf48.bin.f32` for the MultiGP panel). Produces `poster_rd_psnr_Hurricane.png`,
+`poster_field_panel_Hurricane.png`, `recon_panel_Hurricane.png`,
+`multigp_hurricane_rd.png`, and `rd_results_Hurricane.csv`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_LEVELS` / `N_TRAIN` | `100` / `100` | Total vertical levels; DEIM trains its SVD basis on all of them |
+| `DEIM_K_VALS` | `[10, 20, 40, 60, 80]` | Spatial mode counts swept for DEIM-2D |
+| `KRIG_K_VALS` | `[50, 100, 200, 400]` | Sensor counts swept for Kriging-2D |
+| `ABS_BOUNDS` / `ABS_BOUNDS_SZ` | `np.logspace(-4, 0, 20)` | Error-bound sweep (TC spans ~60 °C) |
+| `JITTER` | `1e-6` | GP kernel regularisation |
+| `SKIP_LVLS` | `0` | Near-surface levels excluded (none for TC) |
+| `TIME_IDX` | `50` | Vertical level shown in field panels |
+| `VIZ_K_DEIM` / `VIZ_K_KRIG` | `60` / `200` | `k` shown in the DEIM / GP field panels |
+
+---
+
+### `hurricane_rd_3d.py`
+
+A companion to `hurricane_rd_comparison.py` that instead uses a single
+3D Kronecker-structured GP over the full `(100, 500, 500)` TC volume:
+`K_3d((x1,z1),(x2,z2)) = K_spatial(x1,x2) · K_vertical(z1,z2)`, with
+`k_xy` RPCholesky-selected horizontal sensors combined with `k_z`
+evenly-spaced vertical levels. Prediction uses the Kronecker trick
+(`MU_norm = K_xy_Xs @ (K_z_Xs @ alpha_mat).T`) so the full 25M-point
+`K_Xs` matrix is never formed. Reuses the horizontal lengthscale/variance/
+noise/sensor checkpoint from the 2D Kriging runs (`kriging_ckpt_Hurricane_N400.npz`)
+and fits the vertical lengthscale separately from vertical profiles;
+results are cached to `kriging_3d_ckpt_Hurricane.npz`. Compares against
+SZ2/ZFP baselines run on the same full 3D volume.
+
+**Usage**
+
+```bash
+python3 hurricane_rd_3d.py
+```
+
+Set `PLOTS_ONLY = True` (default) to skip re-running compression and just
+re-plot from `rd_results_3D_Hurricane.csv`. Produces
+`poster_rd_psnr_3D_Hurricane.png` and `rd_results_3D_Hurricane.csv`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_T, NY, NX` | `100, 500, 500` | Full TC volume shape |
+| `TIME_IDX` | `50` | Vertical level index used in field panels |
+| `JITTER` | `1e-6` | GP kernel regularisation |
+| `KRIG_CONFIGS` | `[(400, 10)]` | `(k_xy, k_z)` pairs to run — results are insensitive to this choice |
+| `ABS_BOUNDS` | `np.logspace(-4, 0, 20)` | Error-bound sweep for SZ2/ZFP |
+| `RUN_ZFP` | `True` | Toggle ZFP baseline |
+| `PLOTS_ONLY` | `True` | `True` → skip compression, reload CSV, re-plot only |
+
+---
+
 ### `poster_plots.py`
 
 Generates high-resolution (300 DPI), publication/poster-quality figures from
@@ -593,24 +876,78 @@ contain.
 
 ---
 
+### `sst_progressive_gp.py`
+
+The SST analog of `hurricane_progressive_gp.py`: applies the same
+progressive sense→predict→compress round loop, but per-snapshot on the NOAA
+OI SST weekly-mean data instead of per-volume on the hurricane data. Each of
+`T_PROCESS` snapshots (180×360, ocean pixels only — land handled separately)
+is treated as an independent 2D field; the same GP kernel hyperparameters
+(fit once via MLE across snapshots) are reused for every snapshot, while
+sensor positions are chosen adaptively per snapshot via `rpgks`. The module
+docstring notes a natural future extension — a separable space-time
+Kronecker kernel (`k((t,p),(t',p')) = σ² · k_t(t,t') · k_xy(p,p')`) so
+sensors could sit on a joint time×space tensor grid — flagged via the
+`USE_SPACETIME_KRONECKER` placeholder but not yet implemented.
+
+**Usage**
+
+```bash
+python3 sst_progressive_gp.py
+```
+
+Fits/caches kernel hyperparameters to `pgp_sst_hyperparams_matern52.pkl` and
+saves a checkpoint (`pgp_sst_checkpoint_R{N_ROUNDS}_k{K_PER_ROUND}_eb{ERROR_BOUND}_ab{ACCEPT_BINS}_T{T_PROCESS}.pkl`).
+Produces `sst_progressive_gp_panels.png` and `sst_progressive_gp_histograms.png`.
+Set `PLOTS_ONLY = True` to skip recomputation and re-plot from an existing
+checkpoint.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_ROUNDS` | `5` | Progressive sensing rounds per snapshot |
+| `K_PER_ROUND` | `100` | Ocean sensors selected per round |
+| `ERROR_BOUND` | `0.5` | Quantiser half-width (°C); SZ2 bin width = 2×EB |
+| `ACCEPT_BINS` | `1` | Bins accepted as "compressed" (`ACCEPT_BOUND = ACCEPT_BINS × EB`) |
+| `ACCUMULATE` | `True` | `True` → sensors accumulate round-over-round |
+| `T_PROCESS` | `100` | Number of snapshots processed (`None` → all 1727) |
+| `LS_XY` | `0.10` | Horizontal correlation length in `[0,1]²` (starting value; refit via MLE) |
+| `USE_SPACETIME_KRONECKER` | `False` | Placeholder — space-time Kronecker kernel not yet implemented |
+| `PLOTS_ONLY` | `False` | `True` → skip recomputation, reload checkpoint, re-plot only |
+
+---
+
 ### `sst_rd_comparison.py`
 
 Rate-distortion comparison analogous to `rate_distortion_comparison.py`, but
 on a different dataset entirely: NOAA OI SST V2 weekly-mean sea-surface
 temperature (`sst.wkmean.1990-present.nc`, 1727 weekly snapshots × 180 lat ×
 360 lon, read from the sibling `gpoed-code-python` directory, not
-`100x500x500/`). Compares SZ2, ZFP, DEIM-2D, and Kriging-2D (no T-DEIM/MultiGP,
-since there's only one field and no vertical-level dimension to exploit).
+`100x500x500/`). Compares SZ2, SZ3, ZFP, DEIM-2D, and Kriging-2D (no
+T-DEIM/MultiGP, since there's only one field and no vertical-level dimension
+to exploit). Land pixels are zeroed out via an ocean mask before compression,
+and all PSNR/SSIM/RMSE metrics are computed over ocean pixels only. (Note:
+the module docstring still says `N_TRAIN=260`; the config block now trains
+on the full `N_TRAIN=1727` snapshots.)
 
-`N_TRAIN=260` evenly-spaced snapshots are used to fit each model (SVD basis
-for DEIM, or Matérn-3/2 GP hyperparameters + RPCholesky sensor placement for
-Kriging); the fitted model is then applied to reconstruct all 1727 time
-steps from `k` sensor readings, with the residual SZ-style quantized and
-Zstd-compressed the same way as the ISABEL scripts. DEIM reconstruction is
-vectorised across all time steps as a single BLAS matmul; the GP path uses a
-batched Cholesky solve with a memory-capped chunked matmul (≤ 1 GB peak).
-Compressed-size accounting includes the trained model (bases/covariance/
-Cholesky, float16/32 + Zstd) so all methods are directly comparable.
+By default `N_TRAIN=1727` (all snapshots) are used to fit each model (SVD
+basis for DEIM, or Matérn-3/2 GP hyperparameters + RPCholesky sensor
+placement for Kriging, with SVD/GP fits checkpointed to disk when
+`USE_CHECKPOINT=True`); the fitted model reconstructs all 1727 time steps
+from `k` sensor readings. Beyond the base SZ-style quantized residual (as in
+the ISABEL scripts), DEIM-2D and Kriging-2D each have several residual-coding
+variants swept via `METHOD_ORDER`: `-L2` (uniform quantization, the default
+active variant), `-LP` (Laplacian quantizer), `-SO` (sensors-only, a single
+scatter point per `k` with no residual coding), `-TT` (TTHRESH-style
+coefficient quantization, off by default via `RUN_DEIM_TT`), and `+SZ2`/`+ZFP`
+hybrid variants that residual-code with SZ2/ZFP instead (off by default via
+`RUN_HYBRID`). DEIM reconstruction is vectorised across all time steps as a
+single BLAS matmul; the GP path uses a batched Cholesky solve with a
+memory-capped chunked matmul (≤ 1 GB peak). Compressed-size accounting
+includes the trained model (bases/covariance/Cholesky, float16/32 + Zstd) so
+all methods are directly comparable. `main()` resumes from `rd_results_SST.csv`
+if present, skipping methods already recorded there.
 
 **Usage**
 
@@ -620,28 +957,219 @@ python3 sst_rd_comparison.py
 
 Set `PLOTS_ONLY = True` to skip re-running compression and just reload
 `rd_results_SST.csv`. Produces `rd_psnr_cr_SST.png`, `rd_psnr_bpv_SST.png`,
-`poster_rd_psnr_SST.png` (zoom-inset poster style), `poster_field_panel_SST.png`
-(true field / DEIM / GP / residual histogram), `rd_budget_breakdown_SST.png`
-(stacked model/sensor/residual byte breakdown per `k`), and `rd_results_SST.csv`.
+`poster_rd_psnr_SST.png` (zoom-inset poster style), `rd_budget_breakdown_SST.png`
+(stacked model/sensor/residual byte breakdown per `k`), `rd_timing_SST.png` and
+`rd_decomp_timing_SST.png` (compress/decompress timing), a reconstruction
+panel (true / DEIM / error), `poster_field_panel_SST.png` (true field / DEIM /
+GP / residual histogram), and `rd_results_SST.csv`.
 
 **Configuration** — edit only the block at the top of the file:
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATA_PATH` | `…/gpoed-code-python/sst.wkmean.1990-present.nc` | NOAA OI SST V2 NetCDF file (sibling directory to Argonne) |
-| `N_TRAIN` | `260` | Evenly-spaced training snapshots used to fit DEIM/Kriging models |
-| `ABS_BOUNDS` | `np.logspace(-4, -0.5, 8)` | Absolute error-bound sweep (°C) for SZ2/ZFP/residual quantization |
-| `ABS_BOUNDS_PRED` | `ABS_BOUNDS + [0.5, 1.0, 2.0, 5.0]` | Extended sweep used for DEIM/Kriging prediction error |
+| `N_TRAIN` | `1727` | Training snapshots used to fit DEIM/Kriging models (all snapshots by default) |
+| `ABS_BOUNDS` | `np.logspace(-4, -0.5, 8)` | Absolute error-bound sweep (°C) used by SZ2's own accuracy mode |
+| `ABS_BOUNDS_PRED` | `np.logspace(-4, 0, 20)` | Residual-quantization / ZFP sweep, 1e-4–1.0 °C, 20 points |
+| `REL_BOUNDS` | `[2**-k for k in range(3, 17)]` | SZ3 relative error-bound sweep (12.5% … 1.5e-5) |
+| `ZFP_BOUNDS` | `[2**-k for k in range(1, 14)]` | ZFP fixed-accuracy sweep, aligned to powers of 2 |
 | `NUM_BINS` | `65536` | Quantization bin count (mirrors SZ2) |
-| `DEIM_K_VALUES` | `[10, 25, 50, 100, 200]` | Spatial SVD modes swept for DEIM-2D (≤ `N_TRAIN`) |
-| `KRIG_K_VALUES` | `[100, 200, 300]` | Sensor counts swept for Kriging-2D |
-| `HIST_K` | `50` | Fixed `k` used in the residual-histogram panel |
+| `DEIM_K_VALS` | `range(200, 1601, 200)` | Spatial SVD modes swept for DEIM-2D |
+| `KRIG_K_VALS` | `range(200, 2001, 200)` | Sensor counts swept for Kriging-2D |
+| `HIST_K` | `500` | Fixed `k` used in the residual-histogram panel |
 | `TIME_IDX` | `864` | Snapshot index shown in field panels (~mid-dataset, July 2006) |
-| `VIZ_K_DEIM` / `VIZ_K_KRIG` | `100` / `100` | `k` shown in field panels for DEIM-2D / Kriging-2D |
+| `VIZ_K_DEIM` / `VIZ_K_KRIG` | `500` / `500` | `k` shown in field panels for DEIM-2D / Kriging-2D |
 | `VIZ_AB` | `1e-2` | Abs-bound shown in field panel (closest match used) |
+| `DPI` | `150` | Output resolution for plots |
 | `RUN_LIBPRESSIO` | `True` | `False` → skip both SZ2 and ZFP |
 | `RUN_ZFP` | `True` | `False` → skip ZFP only |
+| `RUN_HYBRID` | `False` | `True` → also run DEIM/Kriging + SZ2/ZFP hybrid residual coding |
+| `RUN_DEIM_TT` | `False` | `True` → also run DEIM-2D-TT (TTHRESH-style coefficient quantization) |
 | `PLOTS_ONLY` | `False` | `True` → skip compression, reload CSV, re-plot only |
+| `USE_CHECKPOINT` | `True` | `True` → cache SVD basis / GP hyperparams to disk, keyed by `N_TRAIN` |
+
+---
+
+### `lorenzo_vs_global_diagnostic.py`
+
+Diagnostic-only script (no compression run) that isolates just the
+prediction step and compares residual distributions for three predictors on
+the SST dataset: **Lorenzo 2-D** (SZ2's local 2D linear finite-difference
+predictor, `pred[i,j] = field[i-1,j] + field[i,j-1] - field[i-1,j-1]`),
+**Lorenzo 1-D** (SZ2-1D's predecessor-based predictor over the flattened
+ocean-pixel strip), **DEIM** (global SVD predictor loaded from the
+checkpoint produced by `sst_rd_comparison.py`), and **GP** (global
+Matérn-3/2 GP predictor, also loaded from checkpoint). Requires only the raw
+SST NetCDF file plus the `deim_ckpt_SST_N1727.npz` / GP checkpoint files —
+does not refit any model. Prints a summary table (RMSE, std, kurtosis,
+outlier fractions at 2σ/3σ/5σ of the Lorenzo residual) for each method.
+
+**Usage**
+
+```bash
+python3 lorenzo_vs_global_diagnostic.py
+```
+
+Requires `sst_rd_comparison.py` to have been run first (to produce the
+checkpoint files) and `netCDF4` installed. Saves
+`lorenzo_vs_global_residuals.png` (overlaid histograms + violin plots).
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `N_SNAPSHOTS` | `10` | Number of snapshots analysed (set to `1` for a quick run) |
+| `DEIM_K` | `1600` | DEIM sensor/mode count to load from checkpoint |
+| `GP_K` | `2000` | GP sensor count to load from checkpoint |
+| `N_TRAIN` | `1727` | Must match the `N_TRAIN` used when the checkpoints were built |
+
+---
+
+### `residual_autocorr_diagnostic.py`
+
+Another diagnostic-only script (no recomputation, no `libpressio` needed)
+that loads the existing DEIM and GP checkpoints for the SST dataset and
+examines residual structure at a fixed sensor count (`K_DIAG`) for one
+representative snapshot (`TIME_IDX`): sensor selection is redone cheaply
+(Q-DEIM QR pivoting for DEIM; GP sensors read from checkpoint) but the
+expensive training step is skipped entirely. Produces a residual histogram
+comparing DEIM vs. GP, and a 2D spatial autocorrelation map (plus radial
+profile) of each method's residual field, to check whether residuals are
+still spatially correlated (and thus further compressible) after
+prediction.
+
+**Usage**
+
+```bash
+python3 residual_autocorr_diagnostic.py
+```
+
+Run from the Argonne directory (or adjust `ARGONNE`/`DATA_PATH` at the top).
+Requires the DEIM/GP checkpoints from `sst_rd_comparison.py` to already
+exist. Saves `residual_distribution.png` and `residual_autocorr.png`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATA_PATH` | `…/sst.nc` | Same SST file used by `sst_rd_comparison.py` |
+| `FIELD_TAG` | `'SST'` | Checkpoint filename tag |
+| `N_TRAIN` | `1727` | Must match the checkpoint's training set size |
+| `K_DIAG` | `800` | Sensor count to inspect |
+| `TIME_IDX` | `500` | Snapshot index analysed |
+
+---
+
+### `plot_timing.py`
+
+Standalone timing figure for the Hurricane dataset, reading from
+`rd_results_Hurricane.csv` (produced by `hurricane_rd_comparison.py`).
+Two panels: one-time training cost per method (bar chart: SZ2, ZFP,
+DEIM-2D+SZ2, Kriging-2D+SZ2), and median per-compression time grouped by
+method × sensor count `k`.
+
+**Usage**
+
+```bash
+python3 plot_timing.py
+```
+
+Requires `rd_results_Hurricane.csv` to already exist. Saves
+`timing_Hurricane.png`.
+
+No top-of-file config block beyond fixed paths/colours; `CSV_PATH` and
+`OUT_PATH` point at the Hurricane results by default.
+
+---
+
+### `plot_timing_amortized.py`
+
+Companion to `plot_timing.py`: shows cumulative wall-clock time (training +
+compression) vs. number of snapshots compressed, for the Hurricane dataset,
+highlighting the break-even point where a hybrid method's amortized total
+time drops below the SZ2/ZFP baseline (since GP/DEIM training is a one-time
+cost not repeated per snapshot). Uses per-compression medians from
+`rd_results_Hurricane.csv`, with hardcoded fallback training times
+(DEIM≈10.9s, Kriging≈339.4s) if not present in the CSV.
+
+**Usage**
+
+```bash
+python3 plot_timing_amortized.py
+```
+
+Requires `rd_results_Hurricane.csv`. Saves `timing_amortized_Hurricane.png`.
+
+**Configuration** — edit only the block at the top of the file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEIM_K` | `80` | DEIM sensor count shown (lowest per-compression time) |
+| `KRIG_K` | `400` | Kriging sensor count shown (largest — best RD, all k similar in speed) |
+| `N_MAX` | `500` | Max snapshots shown on the x-axis |
+
+---
+
+### `plot_timing_sst.py`
+
+SST-dataset counterpart of `plot_timing.py`: a single bar chart of median
+per-compression time (± std), grouped by method, for eight
+method/residual-coder combinations (SZ2, SZ2-1D, ZFP, ZFP-1D, DEIM-2D+SZ2,
+DEIM-2D+ZFP, Kriging-2D+SZ2, Kriging-2D+ZFP), read from `rd_results_SST.csv`
+(produced by `sst_rd_comparison.py`). Training times were not recorded for
+the SST runs, so only per-compression time is shown.
+
+**Usage**
+
+```bash
+python3 plot_timing_sst.py
+```
+
+Requires `rd_results_SST.csv`. Saves `timing_SST.png`.
+
+No top-of-file config block beyond fixed paths/colours.
+
+---
+
+### `mask_hurricane.py`
+
+Tiny inspection script: loads `TCf48.bin.f32` (path currently hardcoded to
+a placeholder `/path/to/TCf48.bin.f32` — edit before running) reshaped to
+`(100, 500, 500)`, and prints min/max/std/NaN-count for the first 15
+vertical levels. Used to spot-check for degenerate or all-NaN near-surface
+levels before running the main scripts. No output files.
+
+**Usage**
+
+```bash
+python3 mask_hurricane.py
+```
+
+---
+
+### `patch_libpressio.py`
+
+One-off build-fix utility, unrelated to the Kriging/DEIM analysis: patches
+the `libpressio` 0.94.0 SWIG-generated bindings for macOS compatibility
+inside a Spack stage directory. Applies two source-level fixes — (1) in
+`pypressio.h`, wraps `vector<uint64_t>` dimension arguments in
+`std::vector<size_t>(...)` at each `pressio_data::` call site, and (2) in
+the generated `pressioPYTHON_wrap.cxx`, replaces
+`_from_numpy_1d/2d/3d/4d<long>` with `<int64_t>` (macOS treats `long` and
+`int64_t` as distinct types even though they're the same width). Locates the
+Spack stage via a hardcoded glob pattern, prints which replacements were
+applied, and prints the follow-up `make`/`spack install` commands to run
+manually.
+
+**Usage**
+
+```bash
+python3 patch_libpressio.py
+```
+
+Run once, after `spack install libpressio@0.94.0 +python` has staged the
+source but before the build completes; edit `STAGE_GLOB` at the top if the
+Spack staging path differs.
 
 ---
 
@@ -732,7 +1260,7 @@ Saves `fig8_cloud_slice{LEVEL}_cr{TARGET_CR}.png` and
 
 ---
 
-## Dataset
+## Datasets
 
 **ISABEL Hurricane Simulation**
 
@@ -759,22 +1287,32 @@ data = np.fromfile("Uf48.bin.f32", dtype=np.float32).reshape((100, 500, 500))
 # axis 2: longitude (z)
 ```
 
+Other variables used by some scripts (same directory, same format):
+`Vf48.bin.f32`, `Wf48.bin.f32` (wind components), `CLOUDf48.bin.f32`,
+`QVAPORf48.bin.f32`, `TCf48.bin.f32` (temperature).
+
+**NOAA OI SST V2 (weekly means)**
+
+> R. W. Reynolds et al., *NOAA_OI_SST_V2*, NOAA/OAR/ESRL PSL, 1990–present.
+> Available at: https://psl.noaa.gov/data/gridded/data.noaa.oisst.v2.html
+
+Used by `sst_rd_comparison.py`, `sst_progressive_gp.py`,
+`lorenzo_vs_global_diagnostic.py`, and `residual_autocorr_diagnostic.py`.
+1727 weekly snapshots, 180×360 (lat×lon) grid. Scripts expect
+`sst.wkmean.1990-present.nc` and a companion `lsmask.nc` land/sea mask, both
+read from a sibling `gpoed-code-python/` directory (i.e. one level up from
+this repo, in a folder of that name) — update `DATA_PATH`/`MASK_PATH` near
+the top of each script if your layout differs. Only ocean pixels are used;
+land is masked out before compression and excluded from PSNR/SSIM/RMSE.
+
 ---
 
 ## Requirements
 
-```
-numpy
-scipy
-matplotlib
-scikit-learn
-```
-
-Install with:
-
-```bash
-pip install numpy scipy matplotlib scikit-learn
-```
+See [Installation](#installation) above and `requirements.txt` in this
+repository for the full, accurate dependency list (including the
+non-pip-installable ones: `libpressio`, a built `sz3` binary, `mpi4py` +
+MPI, and the sibling `gpoed-code-python` package).
 
 ---
 
@@ -784,3 +1322,25 @@ pip install numpy scipy matplotlib scikit-learn
   Contains 1D/2D/3D Kriging experiments and the initial CSSP implementation.
 - `Kriging-DEIM-fixed.ipynb` — copy of the above with six bugs corrected.
 - `Kriging-DEIM-notes.md` — cell-by-cell reference document for the notebook.
+
+### Generated artifacts
+
+Running these scripts produces checkpoints (`.pkl`, some 100MB–1GB+ for the
+progressive-GP scripts), result CSVs, and figures (`.png`/`.gif`/`.mp4`)
+directly in this directory. None of these are committed — see `.gitignore`.
+Several scripts (`sz3_gp_comparison.py`, `hurricane_gp_comparison.py`,
+`lorenzo_vs_global_diagnostic.py`, `residual_autocorr_diagnostic.py`, the
+`plot_timing*.py` family, `run_fig3.py`) *read* a checkpoint or CSV produced
+by another script rather than generating their own from scratch — check
+each entry above for which upstream script needs to run first.
+
+### Hardcoded local paths
+
+A few scripts have machine-specific paths hardcoded near the top that will
+need updating for a new environment: `SZ3_BIN` (path to a built SZ3 binary,
+in `sz3_gp_comparison.py` and `hurricane_gp_comparison.py`), `STAGE_GLOB`
+(Spack stage directory, in `patch_libpressio.py`), and the
+`gpoed-code-python` sibling-directory assumption used for SST data and for
+`rpgks`/`pivoted_cholesky` imports (`kriging_hurricane.py`,
+`sst_rd_comparison.py`, `sst_progressive_gp.py`,
+`lorenzo_vs_global_diagnostic.py`, `residual_autocorr_diagnostic.py`).

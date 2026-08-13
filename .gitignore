@@ -12,9 +12,14 @@ mug comp/
 *.png
 *.jpg
 *.jpeg
+*.gif
+*.mp4
+frames_panels/
+frames_hists/
 
 # Generated model artifacts and result tables
 *.npz
+*.pkl
 rd_results*.csv
 kriging_hyperparams*.txt
 
