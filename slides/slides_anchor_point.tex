@@ -1,0 +1,287 @@
+% ============================================================
+%  Batch Sequential Anchor Point Placement
+%  for Scientific Data Compression
+%  Compile: pdflatex slides_anchor_point.tex  (run twice)
+%  Requires: beamer-theme-metropolis
+%  Figures in same directory as this .tex file.
+% ============================================================
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\usetheme{metropolis}
+
+% ── packages ────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{colortbl}
+\usepackage{amsmath, amssymb, bm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage[protrusion=true, expansion=false]{microtype}
+\usepackage[T1]{fontenc}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, backgrounds, calc}
+
+\graphicspath{{./}{./frames_panels/}{./frames_hists/}}
+
+% ── colour palette ──────────────────────────────────────────
+\definecolor{cnavy}{HTML}{0D2137}
+\definecolor{cteal}{HTML}{1A6B8A}
+\definecolor{cmint}{HTML}{02C39A}
+\definecolor{cice}{HTML}{E4F2F8}
+\definecolor{cmid}{HTML}{7BB8CC}
+\definecolor{cdgray}{HTML}{2E4057}
+\definecolor{camber}{HTML}{F0A500}
+\definecolor{cmuted}{HTML}{5A7385}
+
+% ── metropolis overrides ────────────────────────────────────
+\setbeamercolor{normal text}{fg=cnavy, bg=white}
+\setbeamercolor{frametitle}{bg=cnavy, fg=white}
+\setbeamercolor{title separator}{fg=cmint}
+\setbeamercolor{progress bar}{fg=cmint, bg=cice}
+\setbeamercolor{alerted text}{fg=cmint}
+\setbeamercolor{block title}{bg=cice, fg=cnavy}
+\setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+\setbeamercolor{itemize item}{fg=cteal}
+\setbeamercolor{itemize subitem}{fg=cmuted}
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+\setbeamerfont{block title}{series=\bfseries, size=\small}
+\setbeamerfont{block body}{size=\small}
+
+% ── title info ───────────────────────────────────────────────
+\title{Batch Sequential Anchor Point Placement}
+\subtitle{for Scientific Data Compression}
+\author{Jessie Chen}
+\institute{Argonne National Laboratory}
+\date{August 2026}
+
+% ── helper: step circle ──────────────────────────────────────
+\newcommand{\stepcircle}[1]{%
+  \tikz[baseline=-0.6ex]\node[circle, fill=cmint, text=cnavy,
+    font=\bfseries\small, inner sep=3pt]{#1};}
+
+% ── helper: stat box ─────────────────────────────────────────
+\newcommand{\statbox}[3]{%
+  \begin{beamercolorbox}[sep=6pt, rounded=true, shadow=false,
+      wd=\linewidth]{block body}
+    {\footnotesize\color{cmid}\textbf{#1}}\\[2pt]
+    {\large\bfseries\color{cnavy} #2}\\[1pt]
+    {\scriptsize\color{cdgray} #3}
+  \end{beamercolorbox}}
+
+% ─────────────────────────────────────────────────────────────
+\begin{document}
+
+% ── SLIDE 1: Title ───────────────────────────────────────────
+{
+\setbeamercolor{background canvas}{bg=cnavy}
+\setbeamercolor{normal text}{fg=white}
+\setbeamercolor{title}{fg=white}
+\setbeamercolor{subtitle}{fg=cice}
+\begin{frame}[plain]
+  \vspace{2em}
+  {\color{cmint}\rule{3pt}{0.65\textheight}}\hspace{1em}%
+  \begin{minipage}{0.88\textwidth}
+    \raggedright
+    {\fontsize{28}{34}\selectfont\bfseries\color{white}
+      Batch Sequential Anchor\\[4pt]Point Placement}\\[10pt]
+    {\large\color{cice} for Scientific Data Compression}\\[30pt]
+    {\small\color{cmid}\raggedright
+      ISABEL Hurricane Uf48 \quad
+      GP-based progressive compression \quad
+      Preliminary results}
+  \end{minipage}
+\end{frame}
+}
+
+% ── SLIDE 2: The Idea ────────────────────────────────────────
+\begin{frame}{The Idea}
+\vspace{0.3em}
+\begin{columns}[T, totalwidth=\textwidth]
+
+  \begin{column}{0.32\textwidth}
+    \begin{block}{\stepcircle{A}\hspace{4pt} Place anchor points}
+      Each round, select $k{=}200$ anchor points from the remaining
+      domain via randomised pivoted Cholesky — targeting
+      high-uncertainty regions.
+    \end{block}
+  \end{column}
+
+  \begin{column}{0.32\textwidth}
+    \begin{block}{\stepcircle{GP}\hspace{4pt} GP prediction}
+      Fit a Gaussian Process on accumulated anchor values. Predict
+      the full field from 200, 400, 600\ldots{} anchors as rounds
+      progress.
+    \end{block}
+  \end{column}
+
+  \begin{column}{0.32\textwidth}
+    \begin{block}{\stepcircle{$\checkmark$}\hspace{4pt} Accept \& compress}
+      Points predicted within $\pm\varepsilon_b$ of truth are
+      \textbf{compressed} and removed from the pool. The rest remain
+      for the next round.
+    \end{block}
+  \end{column}
+
+\end{columns}
+\vfill
+{\scriptsize\color{cmuted}\itshape
+  Rounds repeat until all points are compressed or the budget is exhausted.
+  Anchor values stored losslessly; all others reconstructed via GP at decode time.}
+\end{frame}
+
+% ── SLIDE 3: Algorithm ───────────────────────────────────────
+\begin{frame}{Algorithm}
+\vspace{0.2em}
+\begin{columns}[T, totalwidth=\textwidth]
+
+  \begin{column}{0.47\textwidth}
+    \medskip
+    \stepcircle{1}\enspace{\bfseries\color{cteal} Normalise field}\\[2pt]
+    \hspace{1.6em}{\small z-score normalise to zero-mean unit-variance}
+
+    \bigskip
+    \stepcircle{2}\enspace{\bfseries\color{cteal} Fit hyperparameters}\\[2pt]
+    \hspace{1.6em}{\small Marginal likelihood on 1{,}500-pt subsample
+      $\;\to\;$ \texttt{LS\_Z}, \texttt{LS\_XY}}
+
+    \bigskip
+    \stepcircle{3}\enspace{\bfseries\color{cteal} Select anchors}\\[2pt]
+    \hspace{1.6em}{\small rpgks: randomised pivoted Cholesky
+      $+$ QR pivot on low-rank factor $F$}
+  \end{column}
+
+  \begin{column}{0.06\textwidth}
+    \color{cteal}\rule{1pt}{0.75\textheight}
+  \end{column}
+
+  \begin{column}{0.47\textwidth}
+    \medskip
+    \stepcircle{4}\enspace{\bfseries\color{cteal} GP prediction}\\[2pt]
+    \hspace{1.6em}{\small Posterior mean $+$ variance at all candidate
+      points (batched)}
+
+    \bigskip
+    \stepcircle{5}\enspace{\bfseries\color{cteal} Accept within $\pm\varepsilon_b$}\\[2pt]
+    \hspace{1.6em}{\small Points with $|\text{err}| < \varepsilon_b$
+      marked compressed; pool shrinks}
+
+    \bigskip
+    \stepcircle{6}\enspace{\bfseries\color{cteal} Repeat}\\[2pt]
+    \hspace{1.6em}{\small Next round targets residual high-variance
+      region with 200 new anchors}
+  \end{column}
+
+\end{columns}
+\end{frame}
+
+% ── SLIDE 4: Spatial Results ─────────────────────────────────
+\begin{frame}{Spatial Results — Hurricane Uf48 (slice $z = 50$)}
+\vspace{0.2em}
+
+% Top: side-by-side panel images
+\begin{columns}[T, totalwidth=\textwidth]
+  \begin{column}{0.49\textwidth}
+    {\small\bfseries\color{cteal}
+      Round 1 \textbullet{} 200 anchors \textbullet{} 16.0\% compressed}\\[3pt]
+    \includegraphics[width=\linewidth]{frame_001}
+  \end{column}
+  \begin{column}{0.02\textwidth}\end{column}
+  \begin{column}{0.49\textwidth}
+    {\small\bfseries\color{cteal}
+      Round 5 \textbullet{} 1{,}000 anchors \textbullet{} 57.4\% compressed}\\[3pt]
+    \includegraphics[width=\linewidth]{frame_005}
+  \end{column}
+\end{columns}
+
+\smallskip
+
+% Stat row
+\begin{columns}[T, totalwidth=\textwidth]
+  \begin{column}{0.235\textwidth}
+    \statbox{PSNR}{26.6 $\to$ 31.6 dB}{$\uparrow$5 dB in 5 rounds}
+  \end{column}
+  \begin{column}{0.03\textwidth}\end{column}
+  \begin{column}{0.235\textwidth}
+    \statbox{Compressed}{16\% $\to$ 57\%}{cumulative}
+  \end{column}
+  \begin{column}{0.03\textwidth}\end{column}
+  \begin{column}{0.235\textwidth}
+    \statbox{Anchors}{200 $\to$ 1{,}000}{accumulating}
+  \end{column}
+  \begin{column}{0.03\textwidth}\end{column}
+  \begin{column}{0.235\textwidth}
+    \statbox{Entropy $H$}{4.87 $\to$ 3.46 bits}{histogram sharpening}
+  \end{column}
+\end{columns}
+\end{frame}
+
+% ── SLIDE 5: Error Histograms ────────────────────────────────
+\begin{frame}{Error Distribution — Rounds 1 \& 5}
+\vspace{0.3em}
+\begin{columns}[T, totalwidth=\textwidth]
+  \begin{column}{0.49\textwidth}
+    {\small\bfseries\color{cteal} Round 1 \textbullet{} broad distribution,
+      $H = 4.87$ bits}\\[4pt]
+    \includegraphics[width=\linewidth]{hist_001}
+  \end{column}
+  \begin{column}{0.02\textwidth}\end{column}
+  \begin{column}{0.49\textwidth}
+    {\small\bfseries\color{cteal} Round 5 \textbullet{} peaked at zero,
+      $H = 3.46$ bits}\\[4pt]
+    \includegraphics[width=\linewidth]{hist_005}
+  \end{column}
+\end{columns}
+\vfill
+{\scriptsize\color{cmuted}
+  Gold band = compressed zone $(\pm\varepsilon_b)$.
+  Grey lines = SZ2 quantisation bin boundaries (every $2\varepsilon_b$).
+  Lower $H$ $\Rightarrow$ more Huffman-compressible residuals.}
+\end{frame}
+
+% ── SLIDE 6: Summary & Next Steps ────────────────────────────
+{
+\setbeamercolor{background canvas}{bg=cnavy}
+\setbeamercolor{frametitle}{bg=cdgray, fg=white}
+\begin{frame}{Summary \& Next Steps}
+\begin{columns}[T, totalwidth=\textwidth]
+
+  \begin{column}{0.47\textwidth}
+    \begin{itemize}\setlength\itemsep{8pt}
+      \item[\textcolor{cmint}{$\checkmark$}]
+            \textcolor{white}{GP-guided anchor selection concentrates budget on
+            hard-to-predict regions}
+      \item[\textcolor{cmint}{$\checkmark$}]
+            \textcolor{white}{Error histogram peaks toward $\pm\varepsilon_b$ over rounds
+            — entropy drops, more Huffman-compressible}
+      \item[\textcolor{cmint}{$\checkmark$}]
+            \textcolor{white}{PSNR improves monotonically with accumulated anchors}
+      \item[\textcolor{cmint}{$\checkmark$}]
+            \textcolor{white}{Acceptance band configurable:
+            \texttt{ACCEPT\_BINS} $\times\,\varepsilon_b$}
+    \end{itemize}
+  \end{column}
+
+  \begin{column}{0.06\textwidth}
+    \color{cteal}\rule{1pt}{0.75\textheight}
+  \end{column}
+
+  \begin{column}{0.47\textwidth}
+    {\bfseries\color{cmid} Next Steps}\medskip
+    \begin{itemize}\setlength\itemsep{8pt}
+      \item[\textcolor{cmint}{$\to$}]
+            \textcolor{white}{Fit 3D hyperparameters (\texttt{LS\_Z}, \texttt{LS\_XY})
+            via marginal likelihood}
+      \item[\textcolor{cmint}{$\to$}]
+            \textcolor{white}{Measure actual bit rate after Huffman encoding quantised
+            residuals}
+      \item[\textcolor{cmint}{$\to$}]
+            \textcolor{white}{R-D curve comparison vs SZ2 / ZFP on Uf48}
+      \item[\textcolor{cmint}{$\to$}]
+            \textcolor{white}{Scale to full 25M-point volume on cluster}
+    \end{itemize}
+  \end{column}
+
+\end{columns}
+\end{frame}
+}
+
+\end{document}

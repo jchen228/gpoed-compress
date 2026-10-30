@@ -1,0 +1,297 @@
+% ============================================================
+%  Compress to Impress
+%  5-Slide Elevator Pitch — Summer Student Symposium, July 2026
+%  Compile: pdflatex compress_to_impress.tex  (run twice)
+%  Figures must be in the same directory as this .tex file.
+% ============================================================
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\usetheme{metropolis}
+
+% ── packages ────────────────────────────────────────────────
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usepackage[T1]{fontenc}
+\usetikzlibrary{arrows.meta, positioning}
+
+\graphicspath{{./}}
+
+% ── colour palette ──────────────────────────────────────────
+\definecolor{cnavy}{HTML}{0D2137}
+\definecolor{cteal}{HTML}{1A6B8A}
+\definecolor{cice}{HTML}{D6EBF5}
+\definecolor{camber}{HTML}{F0A500}
+\definecolor{cgreen}{HTML}{1D8A5E}
+\definecolor{cred}{HTML}{C0392B}
+\definecolor{cmuted}{HTML}{5A7385}
+
+% ── metropolis overrides ────────────────────────────────────
+\setbeamercolor{normal text}{fg=cnavy, bg=white}
+\setbeamercolor{frametitle}{bg=cnavy, fg=white}
+\setbeamercolor{title separator}{fg=cteal}
+\setbeamercolor{progress bar}{fg=cteal, bg=cice}
+\setbeamercolor{alerted text}{fg=camber}
+\setbeamercolor{block title}{bg=cice, fg=cnavy}
+\setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+\setbeamercolor{itemize item}{fg=cteal}
+\setbeamercolor{itemize subitem}{fg=cmuted}
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+\setbeamerfont{block title}{series=\bfseries, size=\small}
+\setbeamerfont{block body}{size=\small}
+
+% ── title info ───────────────────────────────────────────────
+\title{Compress to Impress}
+\subtitle{Sensor-Based Methods for Scientific Data Compression}
+\author{Jessie Chen \\ {\small Mentors: Vishwas Rao, Amit Subrahmanya}}
+\institute{%
+  NC State University \quad\textbar\quad
+  {\footnotesize Mentors: Argonne National Laboratory}}
+\date{July 2026}
+
+% ============================================================
+\begin{document}
+% ============================================================
+
+% ── SLIDE 1: Title + compression visual ──────────────────────
+\begin{frame}
+\vfill
+\begin{columns}[c]   % [c] vertically centres both columns
+
+  % Left: title block
+  \begin{column}{0.44\textwidth}
+    {\Large\bfseries\color{cnavy} Compress to Impress}\\[0.4em]
+    {\small\color{cmuted} Sensor-Based Methods for Scientific Data Compression}\\[0.7em]
+    {\small Jessie Chen}\\
+    {\footnotesize\color{cmuted} NC State University}\\[0.25em]
+    {\footnotesize\color{cmuted} Mentors: Vishwas Rao, Amit Subrahmanya}\\
+    {\footnotesize\color{cmuted} Argonne National Laboratory}\\[0.3em]
+    {\footnotesize\color{cmuted} July 2026}
+  \end{column}
+
+  % Right: compression visual — tabular keeps arrow in its own cell
+  \begin{column}{0.54\textwidth}
+    \centering
+    \begin{tabular}{ccc}
+      \includegraphics[width=3.2cm]{poster_sensor_map_CLOUDf48.png} &
+      \raisebox{0.8cm}{%
+        \begin{tikzpicture}
+          \draw[-{Stealth[length=8pt,width=6pt]}, line width=2pt, color=cteal]
+            (0,0) -- (1.0,0)
+            node[midway, above, font=\tiny\color{cteal}] {compress};
+        \end{tikzpicture}} &
+      \includegraphics[width=1.9cm]{poster_sensor_map_CLOUDf48.png} \\[2pt]
+      {\scriptsize Original}               & &
+      {\scriptsize Compressed}             \\
+      {\scriptsize\color{cmuted}$\sim$100 MB} & &
+      {\scriptsize\color{cmuted}$\sim$5 MB}
+    \end{tabular}
+  \end{column}
+
+\end{columns}
+\vfill
+\end{frame}
+
+% ── SLIDE 2: Problem + Prior Solution + SZ2 Weaknesses ───────
+\begin{frame}{The Problem — and One Prior Solution}
+\begin{columns}[T]
+
+  % Block 1: Problem
+  \begin{column}{0.31\textwidth}
+    \begingroup
+    \setbeamercolor{block title}{bg=cred!15, fg=cred}
+    \setbeamercolor{block body}{bg=cred!5, fg=cnavy}
+    \begin{block}{The Problem}
+      \footnotesize
+      Scientific simulations produce \textbf{more data than we can store}.
+      A single climate or physics run can generate terabytes per hour —
+      far beyond disk and bandwidth budgets.
+    \end{block}
+    \endgroup
+  \end{column}
+
+  % Block 2: Prior solution
+  \begin{column}{0.34\textwidth}
+    \begingroup
+    \setbeamercolor{block title}{bg=cice, fg=cnavy}
+    \setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+    \begin{block}{One Solution: Prediction-Based Compression}
+      \footnotesize
+      \textbf{Predict} $\to$ \textbf{residual} $\to$ \textbf{quantize}
+      $\to$ \textbf{entropy code}\\[0.3em]
+      Example: SZ2 (Liang et al., 2018), ZFP (Lindstrom, 2014)\\[0.2em]
+    \end{block}
+    \endgroup
+  \end{column}
+
+  % Block 3: SZ2 weaknesses
+  \begin{column}{0.31\textwidth}
+    \begingroup
+    \setbeamercolor{block title}{bg=camber!25, fg=cnavy}
+    \setbeamercolor{block body}{bg=camber!10, fg=cnavy}
+    \begin{block}{What SZ2 Misses}
+      \footnotesize
+      \begin{itemize}\setlength\itemsep{0.2em}
+        \item \textbf{Local only} — predicts from 2–3 neighbors; no global pattern learning
+        \item \textbf{No training} — cannot learn structure across fields or time
+        \item \textbf{One snapshot at a time} — no cross-field or temporal correlation
+      \end{itemize}
+    \end{block}
+    \endgroup
+  \end{column}
+
+\end{columns}
+
+\vspace{0.4em}
+{\footnotesize\color{cmuted}
+  \textbf{Our question:} Can we do better by learning global spatial structure
+  from a small number of sensor observations?
+}
+\end{frame}
+
+% ── SLIDE 3: Our Approach ─────────────────────────────────────
+\begin{frame}{Our Approach — Sensor-Based Reconstruction}
+\begin{columns}[T]
+
+  \begin{column}{0.42\textwidth}
+    {\small\textcolor{cteal}{\textbf{Key idea:}} choose $k$ sensor locations,
+    observe the field there, and reconstruct everywhere.}\\[0.25em]
+
+    \begingroup
+    \setbeamercolor{block title}{bg=cgreen!15, fg=cgreen}
+    \setbeamercolor{block body}{bg=cgreen!5, fg=cnavy}
+    \begin{block}{Two families of methods}
+      \footnotesize
+      \textbf{DEIM} — learn dominant spatial modes (SVD) from training snapshots;
+      sensors selected by Q-DEIM pivoting.\\[0.15em]
+      \textbf{Kriging} — fit a Matérn Gaussian Process; sensors selected
+      by Randomly Pivoted Cholesky.
+    \end{block}
+    \endgroup
+
+    \vspace{0.2em}
+    {\small\textbf{What we store:}}\\
+    {\footnotesize basis/model (float16) + sensor indices + sensor values (float16)
+    + quantized residuals}
+  \end{column}
+
+  \begin{column}{0.56\textwidth}
+    \vspace{-0.6em}
+    \begin{center}
+      \includegraphics[width=0.96\textwidth, height=0.60\textheight, keepaspectratio]%
+        {poster_fig3_big_panel_CLOUDf48.png}
+    \end{center}
+    \vspace{-0.3em}
+    {\tiny\color{cmuted}
+      Top: true field, GP-2D, Multi-output GP.
+      Bottom: DEIM-2D, T-DEIM, Error Quantization.}
+  \end{column}
+
+\end{columns}
+\end{frame}
+
+% ── SLIDE 4: Results ──────────────────────────────────────────
+\begin{frame}{Results — PSNR vs Compression Ratio}
+\begin{columns}[T]
+
+  \begin{column}{0.56\textwidth}
+    \vspace{-0.5em}
+    \begin{center}
+      \includegraphics[width=\textwidth, height=0.78\textheight, keepaspectratio]%
+        {poster_rd_psnr_CLOUDf48.png}
+    \end{center}
+  \end{column}
+
+  \begin{column}{0.42\textwidth}
+    \vspace{0.4em}
+    {\small\textcolor{cteal}{\textbf{Reading the plot}}}\\[0.25em]
+    {\footnotesize
+    \textbf{PSNR} (y-axis) — reconstruction accuracy in decibels.
+    Higher is better; each +6 dB $\approx$ halves the RMS error.\\[0.25em]
+    \textbf{CR} (x-axis, log) = raw bytes / stored bytes.
+    Higher means more compressed.
+    }
+
+    \vspace{0.35em}
+    \begingroup
+    \setbeamercolor{block title}{bg=camber!25, fg=cnavy}
+    \setbeamercolor{block body}{bg=camber!10, fg=cnavy}
+    \begin{block}{Takeaway}
+      \footnotesize
+      Our methods achieve \textbf{higher accuracy} at the compression
+      ratios where they operate. SZ2 and ZFP reach higher CR because
+      their local predictor produces low-entropy residuals — closing
+      this gap is our primary future work.
+    \end{block}
+    \endgroup
+  \end{column}
+
+\end{columns}
+\end{frame}
+
+% ── SLIDE 5: Future Work ──────────────────────────────────────
+\begin{frame}{Future Work}
+\begin{columns}[T]
+
+\begin{column}{0.48\textwidth}
+\begingroup
+\setbeamercolor{block title}{bg=cice, fg=cnavy}
+\setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+\begin{block}{Find ways to increase CR and try other benchmarks}
+  \small
+  Ideally, we could find why PSNR is so high and sacrifice some of that to increase the CR. There are more lossy compressors to compare to such as: TTHRESH, SZ3.
+\end{block}
+\endgroup
+\end{column}
+
+  \begin{column}{0.48\textwidth}
+    \begingroup
+    \setbeamercolor{block title}{bg=cice, fg=cnavy}
+    \setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+    \begin{block}{Evaluating across time}
+      \small
+      Track reconstruction quality across the full time record of a
+      simulation — not just a single snapshot. Identify where global
+      structure is most and least stable.
+    \end{block}
+    \endgroup
+  \end{column}
+
+\end{columns}
+
+\vspace{0.5em}
+\begin{columns}[T]
+
+  \begin{column}{0.48\textwidth}
+    \begingroup
+    \setbeamercolor{block title}{bg=cice, fg=cnavy}
+    \setbeamercolor{block body}{bg=cice!40, fg=cnavy}
+    \begin{block}{Extending to other datasets}
+      \small
+      Apply the same framework to NOAA sea surface temperature data —
+      a globally recognizable 2D field with strong spatial coherence
+      and a clear ocean/land structure.
+    \end{block}
+    \endgroup
+  \end{column}
+
+  \begin{column}{0.48\textwidth}
+    \vspace{0.4em}
+    \begin{center}
+      {\Large\color{cteal}\textbf{Thank you}}\\[0.3em]
+      {\small\color{cmuted}
+        Questions welcome.\\[0.4em]
+        Jessie Chen \quad {\footnotesize NC State University}\\[0.2em]
+        Mentors: Vishwas Rao, Amit Subrahmanya\\
+        {\footnotesize Argonne National Laboratory}
+      }
+    \end{center}
+  \end{column}
+
+\end{columns}
+\end{frame}
+
+% ============================================================
+\end{document}

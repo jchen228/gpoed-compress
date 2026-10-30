@@ -1,0 +1,255 @@
+% ============================================================
+%  Summer Report — Prediction-Based Lossy Compression
+%  (DEIM / Gaussian Process methods on ISABEL Hurricane & SST)
+%
+%  HOW TO USE THIS FILE
+%  ---------------------
+%  Every section below contains an OUTLINE block in red italic text
+%  (\prompt{...}) instead of drafted prose. These are prompts/reminders
+%  of what to cover, written by working through the code and past
+%  discussion with Claude. Write your own prose to replace/surround
+%  them, then delete the \prompt{...} lines before final submission.
+%
+%  To use in Overleaf:
+%    1. New Project -> Blank Project in Overleaf
+%    2. Upload this file, replacing main.tex (or set this as the
+%       main document under Menu -> Settings)
+%    3. Upload figures referenced below into the same project
+%       (see the "FIGURES NEEDED" notes in each section)
+% ============================================================
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{caption}
+
+% Visible outline/prompt helper — delete \prompt{} calls before final submission.
+\newcommand{\prompt}[1]{{\color{red}\itshape [PROMPT: #1]}\par\medskip}
+
+\title{Prediction-Based Lossy Compression for Scientific Data:\\
+       Gaussian Process and DEIM Methods on the ISABEL Hurricane and NOAA SST Datasets}
+\author{Jessie Chen \\ Argonne National Laboratory}
+\date{Summer 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+\prompt{2--4 sentences. State the overall goal (using prediction models
+as a preprocessing/predictor step ahead of quantization, to beat
+general-purpose compressors like SZ2/SZ3/ZFP on structured scientific
+fields), name the two datasets (ISABEL hurricane, NOAA OI SST), and
+give the one-sentence status of where things currently stand
+(some methods beat the baseline, the newest method does not yet --
+be explicit that this is stated plainly, not hidden).}
+\end{abstract}
+
+% ============================================================
+\section{Motivation and Background}
+\label{sec:motivation}
+
+\prompt{Explain why this project exists. Suggested points to hit:
+\begin{itemize}
+  \item What SZ2/ZFP/SZ3 do at a high level (predict each point from
+        its neighbors via a local predictor, e.g. Lorenzo; quantize the
+        residual; entropy-code; fall back to raw storage when the
+        predictor fails on a point).
+  \item Why a \emph{global} predictor (GP regression or a low-rank
+        SVD/DEIM basis, fit from a small number of sensor readings)
+        might do better than a \emph{local} predictor like Lorenzo on
+        fields with strong global spatial structure (e.g. a hurricane's
+        vortex, or SST's large-scale ocean currents).
+  \item What "the compressor" means in this project's framework:
+        predict the full field from $k$ sensor readings $\to$ residual
+        $=$ true $-$ predicted $\to$ quantize/entropy-code the residual
+        the same way SZ does, so comparisons are apples-to-apples.
+  \item One or two sentences citing the two real datasets used
+        (ISABEL Hurricane Uf48, 100$\times$500$\times$500 wind field;
+        NOAA OI SST V2 weekly means, 1727 snapshots).
+\end{itemize}}
+
+% ============================================================
+\section{Most Recent Method: Progressive GP / Batch-Sequential Anchor Placement}
+\label{sec:progressive-gp}
+
+\prompt{This is the section you're actively improving --- write it last,
+once the outlier-fallback fix is implemented and re-run. Keep the
+structure below either way, since you agreed to report this
+transparently.}
+
+\subsection{Idea and Algorithm}
+\prompt{Describe the round-based idea: each round, place $k$ new
+anchor/sensor points via randomized pivoted Cholesky (targeting
+high-uncertainty regions), fit a GP on all accumulated sensors, predict
+everywhere, and mark points within an acceptance band as done. Mention
+this is implemented in \texttt{hurricane\_progressive\_gp.py}.
+FIGURE NEEDED: algorithm diagram / the "The Idea" and "Algorithm"
+slides you already built in \texttt{slides\_anchor\_point.tex} can be
+reused or adapted here.}
+
+\subsection{Current Status: Comparison Against SZ3}
+\prompt{State plainly, with numbers, where this stands as of the most
+recent run (from \texttt{sz3\_gp\_comparison.py} / \texttt{sz3\_gp\_comparison.png}):
+SZ3 reaches PSNR 83.4 dB with 100\% of voxels within the 0.01 m/s error
+bound; Progressive GP reaches PSNR 36.6 dB with only 28.2\% of voxels
+within bound after 10 rounds (2,500 sensors, $\sim$0.1\% of the domain).
+Note the trend is favorable round-over-round (entropy falling,
+PSNR rising monotonically) even though the absolute gap is large.
+FIGURE NEEDED: \texttt{sz3\_gp\_comparison.png} (4-panel comparison),
+plus \texttt{frames\_hists/hist\_010.png} or similar for the error
+histogram.}
+
+\subsection{Diagnosis: Why the Gap}
+\prompt{Explain the root cause you identified: the current algorithm
+has no fallback/outlier mechanism. SZ2/SZ3 guarantee their error bound
+by storing any point their predictor can't hit raw/exactly; Progressive
+GP currently just leaves unresolved points unresolved after the round
+budget runs out. Contrast this against the histogram plot's own
+visualization issue you caught (percentile-clipped x-axis in
+\texttt{\_compute\_edges()}, and the accept band being visually
+imperceptible against the plotted range) -- note that finding as a
+secondary, presentation-only bug, separate from the real algorithmic gap.}
+
+\subsection{Fix and (Once Complete) Updated Results}
+\prompt{Describe the SZ-style quantize-with-outlier-fallback fix:
+quantize every point's residual against \texttt{EB} directly (not the
+looser \texttt{ACCEPT\_BOUND} used mid-loop); anything that would clip
+gets stored raw instead. This guarantees 100\% coverage by construction.
+Once you've re-run \texttt{sz3\_gp\_comparison.py} with this fix, replace
+this prompt with the updated numbers/figure and be honest about the new
+bit-rate cost of the outlier fraction.}
+
+% ============================================================
+\section{Earlier Methods: Baseline-Compared Reconstruction Approaches}
+\label{sec:earlier-methods}
+
+\prompt{One-paragraph transition: these are the methods that already
+have completed baseline comparisons (vs. SZ2/ZFP), built up over the
+summer before the progressive-GP idea. State the throughline: Kriging
+and DEIM are the two core reconstruction methods; they were packaged as
+libpressio-compatible external compressors; Kriging was extended to 3D;
+and three head-to-head rate-distortion scripts tie everything together.}
+
+\subsection{Kriging / Gaussian Process Reconstruction}
+\prompt{From \texttt{kriging\_hurricane.py}: Simple Kriging with an
+RBF/Mat\'ern kernel, sensors placed via GKS (randomly-pivoted or
+greedily-pivoted Cholesky), reconstructing held-out ISABEL levels from a
+sparse sensor set. Mention this is a standalone reconstruction-quality
+demo (no baseline comparison itself) -- the baseline comparison happens
+later in \texttt{rate\_distortion\_comparison.py} et al. Include your own
+representative reconstruction numbers/figure if you have one saved
+(e.g. \texttt{kriging\_results.png}).}
+
+\subsection{DEIM Reconstruction}
+\prompt{From \texttt{deim\_hurricane\_v2.py}: Q-DEIM (SVD/POD basis +
+QR-pivoted sensor placement), sensor count chosen automatically from a
+POD-energy error tolerance. Same note as above -- standalone
+reconstruction demo, baseline comparison comes later.}
+
+\subsection{Packaging as libpressio Compressors}
+\prompt{From \texttt{lp\_kriging\_compressor.py} and
+\texttt{lp\_deim\_compressor.py}: train/compress/decompress CLI wrappers
+around the two methods above, registered via libpressio's
+\texttt{external:command} protocol so they can be driven identically to
+SZ/ZFP by any libpressio-based tool. Note this is an interoperability
+packaging, not something the other scripts import directly (they
+reimplement the methods inline instead).}
+
+\subsection{3D Extension: Kronecker GP}
+\prompt{From \texttt{hurricane\_rd\_3d.py}: extends Kriging to a
+separable 3D kernel ($K_{\text{spatial}} \otimes K_{\text{vertical}}$)
+so a single model reconstructs the full volume at once, compared
+directly against SZ2/ZFP on the TC (temperature) field. State the
+result numbers/figure from \texttt{poster\_rd\_psnr\_3D\_Hurricane.png}.}
+
+% ============================================================
+\section{Rate-Distortion Comparisons Against SZ2/ZFP}
+\label{sec:rd-comparisons}
+
+\prompt{This section is where the actual baseline numbers live --
+you said "we have everything we need" for this part, so this is
+likely the most straightforward section to write first.}
+
+\subsection{ISABEL Hurricane (CLOUD/QVAPOR fields)}
+\prompt{From \texttt{rate\_distortion\_comparison.py}: SZ2 vs ZFP vs
+DEIM-2D vs Kriging-2D (T-DEIM and MultiGP results exist here too but
+are excluded per Section~\ref{sec:excluded}). Report where DEIM-2D and
+Kriging-2D land relative to SZ2/ZFP on the PSNR-vs-compression-ratio
+curve -- do they win at any operating point? Cite specific CR/PSNR
+numbers from \texttt{rd\_results\_\{FIELD\_TAG\}.csv}.
+FIGURES NEEDED: \texttt{rd\_psnr\_cr\_*.png}, \texttt{poster\_rd\_psnr\_*.png}.}
+
+\subsection{ISABEL Hurricane (TC / temperature field)}
+\prompt{From \texttt{hurricane\_rd\_comparison.py}: same four-method
+comparison (SZ2, ZFP, DEIM-2D, Kriging-2D) but on the TC field with no
+land mask. Note this is where the 3D Kronecker result from
+Section~\ref{sec:earlier-methods} extends the comparison further.}
+
+\subsection{NOAA OI SST}
+\prompt{From \texttt{sst\_rd\_comparison.py}: SZ2/SZ3/ZFP vs DEIM-2D vs
+Kriging-2D on 1727 weekly SST snapshots (ocean pixels only). This
+dataset has by far the most residual-coding variants tested
+(\texttt{-L2}, \texttt{-LP}, \texttt{-SO}, \texttt{-TT}, hybrid
+\texttt{+SZ2}/\texttt{+ZFP}) -- decide how much of that detail belongs
+in the main report vs. an appendix.}
+
+\subsection{Supporting Diagnostics}
+\prompt{Briefly mention \texttt{lorenzo\_vs\_global\_diagnostic.py} and
+\texttt{residual\_autocorr\_diagnostic.py} if their findings support your
+main argument (e.g. global predictors leaving less spatially-correlated
+residual than Lorenzo) -- these were diagnostic-only, no new compression
+run, so a sentence or two is probably enough rather than a full subsection.}
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\prompt{Synthesize Sections~\ref{sec:earlier-methods}--\ref{sec:rd-comparisons}:
+where do the global-predictor methods (DEIM/Kriging) actually beat
+SZ2/ZFP, and where do they not? What's the mechanism (e.g. GP/DEIM wins
+at low bit rates / high compression ratios where a good global
+prediction saves more than local prediction; loses at high bit rates
+where SZ's cheap fast local predictor is good enough already)? Tie this
+back to why the progressive-GP idea in Section~\ref{sec:progressive-gp}
+was worth trying (targeting the sensor-budget inefficiency of the
+static methods) even though it isn't there yet.}
+
+% ============================================================
+\section{Excluded From This Report: T-DEIM and MultiGP}
+\label{sec:excluded}
+
+\prompt{One paragraph, as agreed. State that \texttt{tdeim\_hurricane.py}
+/ \texttt{lp\_tdeim\_compressor.py} and \texttt{multigp\_hurricane.py} /
+\texttt{lp\_multigp\_compressor.py} were developed and produce
+reconstructions, but have not yet been run through the same SZ2/ZFP
+baseline comparison pipeline as the methods above, so they're left out
+of the quantitative discussion here. Note briefly what each does
+(T-DEIM: sensors placed anywhere in the full 3D volume rather than a
+single slice; MultiGP: joint multi-field reconstruction via a Linear
+Model of Coregionalization) and flag them as candidates for a follow-up
+comparison.}
+
+% ============================================================
+\section{Conclusion and Next Steps}
+\label{sec:conclusion}
+
+\prompt{Summarize: which methods currently beat the SZ2/ZFP/SZ3
+baseline and by how much; what the progressive-GP method still needs
+(outlier fallback, then a fair rerun); what's still open for T-DEIM/MultiGP.
+List concrete next steps -- e.g. finish the quantize+outlier fix, rerun
+the SZ3 comparison, decide whether the sensor-budget/entropy trend from
+Section~\ref{sec:progressive-gp} is compelling enough to pursue further
+even after accounting for the guaranteed-bound cost.}
+
+% ============================================================
+% \appendix
+% \section{Additional Rate-Distortion Detail}
+% \prompt{Optional: move SST residual-coding-variant detail here if
+% Section~\ref{sec:rd-comparisons} got too long.}
+
+\end{document}
