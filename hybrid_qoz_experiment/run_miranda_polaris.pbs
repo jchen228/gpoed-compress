@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -N gp_miranda
+#PBS -l select=1:ncpus=32:mem=256gb
+#PBS -l walltime=08:00:00
+#PBS -l filesystems=home:eagle
+#PBS -q preemptable
+#PBS -A hp-aaims
+#PBS -o /home/jchen228/Argonne/hybrid_qoz_experiment/results_miranda/job.out
+#PBS -e /home/jchen228/Argonne/hybrid_qoz_experiment/results_miranda/job.err
+
+# ── environment ──────────────────────────────────────────────────────────────
+module load conda/2024-04-29
+conda activate /home/jchen228/envs/gp_env    # adjust to your env with numpy/scipy/matplotlib
+
+# ── output dir ───────────────────────────────────────────────────────────────
+mkdir -p /home/jchen228/Argonne/hybrid_qoz_experiment/results_miranda
+
+# ── verify binaries exist ────────────────────────────────────────────────────
+echo "QoZ-hybrid: $(ls -lh /home/jchen228/QoZ-hybrid/build/test/qoz 2>/dev/null || echo MISSING)"
+echo "QoZ-plain:  $(ls -lh /home/jchen228/QoZ/build/test/qoz        2>/dev/null || echo MISSING)"
+echo "SZ3:        $(ls -lh /home/jchen228/SZ3/build/tools/sz3/sz3   2>/dev/null || echo MISSING)"
+
+# ── verify data ───────────────────────────────────────────────────────────────
+echo "Miranda blocks:"
+ls /grand/projects/SDR/Miranda/SDRBENCH-Miranda-3072x3072x3072/density-*.f32 2>/dev/null | head -10
+
+# ── run ──────────────────────────────────────────────────────────────────────
+cd /home/jchen228/Argonne/hybrid_qoz_experiment
+
+python run_miranda_polaris.py 2>&1 | tee results_miranda/stdout.log
+
+echo "PBS job finished at $(date)"

@@ -16,6 +16,8 @@ rsync -avz --progress \
   ~/Desktop/Argonne/hybrid_qoz_experiment/run_hurricane_b2.py \
   ~/Desktop/Argonne/hybrid_qoz_experiment/run_hurricane_w_polaris.py \
   ~/Desktop/Argonne/hybrid_qoz_experiment/run_hurricane_polaris.pbs \
+  ~/Desktop/Argonne/hybrid_qoz_experiment/run_miranda_polaris.py \
+  ~/Desktop/Argonne/hybrid_qoz_experiment/run_miranda_polaris.pbs \
   "${POLARIS_USER}@${POLARIS_HOST}:${REMOTE_BASE}/Argonne/hybrid_qoz_experiment/"
 
 rsync -avz --progress \
@@ -79,6 +81,7 @@ ssh "${POLARIS_USER}@${POLARIS_HOST}" bash -l << 'REMOTE'
 REMOTE
 
 echo ""
-echo "=== All done. To submit the job: ==="
+echo "=== All done. To submit jobs: ==="
 echo "  ssh ${POLARIS_USER}@${POLARIS_HOST}"
 echo "  qsub ~/Argonne/hybrid_qoz_experiment/run_hurricane_polaris.pbs"
+echo "  qsub ~/Argonne/hybrid_qoz_experiment/run_miranda_polaris.pbs"
