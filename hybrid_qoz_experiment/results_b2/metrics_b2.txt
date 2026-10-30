@@ -1,0 +1,46 @@
+Hurricane ISABEL W  —  per-EB metrics table
+====================================================================================================
+Algorithm               EB (rel)   PSNR(dB)       CR  bit/val     max_err   EB satisfied?   hdr_KB   qoz_KB
+----------------------------------------------------------------------------------------------------
+gp_qoz_b2               1.0e-04    84.98        10.3    3.117    1.66e-03              OK     12.3   9501.1
+gp_qoz_b2               5.0e-04    72.35        21.3    1.502    8.29e-03              OK     10.1   4574.9
+gp_qoz_b2               1.0e-03    67.37        30.8    1.038    1.66e-02              OK      9.1   3159.6
+gp_qoz_b2               5.0e-03    56.51       102.6    0.312    8.29e-02              OK      6.8    945.2
+gp_qoz_b2               1.0e-02    52.35       211.0    0.152    1.66e-01              OK      6.0    456.7
+
+gp_sz3                  1.0e-04    85.07         9.3    3.446       n/a                 —    n/a      n/a  
+gp_sz3                  5.0e-04    71.64        18.3    1.748       n/a                 —    n/a      n/a  
+gp_sz3                  1.0e-03    65.91        26.9    1.189       n/a                 —    n/a      n/a  
+gp_sz3                  5.0e-03    53.01        93.5    0.342       n/a                 —    n/a      n/a  
+gp_sz3                  1.0e-02    48.36       208.3    0.154       n/a                 —    n/a      n/a  
+
+gp_sz3_real             1.0e-04    85.07         7.0    4.559       n/a                 —    n/a      n/a  
+gp_sz3_real             5.0e-04    71.64        13.8    2.326       n/a                 —    n/a      n/a  
+gp_sz3_real             1.0e-03    65.91        20.7    1.547       n/a                 —    n/a      n/a  
+gp_sz3_real             5.0e-03    53.01        74.2    0.431       n/a                 —    n/a      n/a  
+gp_sz3_real             1.0e-02    48.36       155.4    0.206       n/a                 —    n/a      n/a  
+
+gp_lorenzo              1.0e-04    85.07         9.8    3.277       n/a                 —    n/a      n/a  
+gp_lorenzo              5.0e-04    71.64        21.5    1.486       n/a                 —    n/a      n/a  
+gp_lorenzo              1.0e-03    65.91        32.5    0.983       n/a                 —    n/a      n/a  
+gp_lorenzo              5.0e-03    53.01       129.3    0.248       n/a                 —    n/a      n/a  
+gp_lorenzo              1.0e-02    48.36       292.8    0.109       n/a                 —    n/a      n/a  
+
+qoz_hpez                1.0e-04    84.99        10.3    3.116    1.66e-03              OK    n/a      n/a  
+qoz_hpez                5.0e-04    72.35        21.3    1.500    8.29e-03              OK    n/a      n/a  
+qoz_hpez                1.0e-03    67.37        30.9    1.037    1.66e-02              OK    n/a      n/a  
+qoz_hpez                5.0e-03    56.42       104.9    0.305    8.29e-02              OK    n/a      n/a  
+qoz_hpez                1.0e-02    52.40       214.9    0.149    1.66e-01              OK    n/a      n/a  
+
+sz3_interp              1.0e-04    85.14         7.0    4.559    1.66e-03              OK    n/a      n/a  
+sz3_interp              5.0e-04    71.61        13.8    2.326    8.29e-03              OK    n/a      n/a  
+sz3_interp              1.0e-03    66.04        20.7    1.547    1.66e-02              OK    n/a      n/a  
+sz3_interp              5.0e-03    54.03        74.2    0.431    8.29e-02              OK    n/a      n/a  
+sz3_interp              1.0e-02    49.28       155.6    0.206    1.66e-01              OK    n/a      n/a  
+
+sz3_lorenzo             1.0e-04    85.34         9.8    3.276    1.66e-03              OK    n/a      n/a  
+sz3_lorenzo             5.0e-04    72.09        21.5    1.486    8.29e-03              OK    n/a      n/a  
+sz3_lorenzo             1.0e-03    66.50        32.6    0.983    1.66e-02              OK    n/a      n/a  
+sz3_lorenzo             5.0e-03    54.58       129.5    0.247    8.29e-02              OK    n/a      n/a  
+sz3_lorenzo             1.0e-02    50.08       293.6    0.109    1.66e-01              OK    n/a      n/a  
+

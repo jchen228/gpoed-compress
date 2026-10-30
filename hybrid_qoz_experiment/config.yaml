@@ -1,0 +1,162 @@
+# ============================================================
+#  Hybrid QoZ+GP  —  Experiment Configuration
+#  Replicates HPEZ paper experiments + our new datasets
+# ============================================================
+
+# ── Binary paths (update for cluster) ───────────────────────
+binaries:
+  qoz_hpez:        /Users/jchen228/Desktop/Argonne/QoZ/install/bin/qoz
+  qoz_hybrid:      /Users/jchen228/Desktop/Argonne/QoZ-hybrid/install/bin/qoz
+  sz3_interp:      /Users/jchen228/Desktop/Argonne/SZ3/build/tools/sz3/sz3
+
+# ── Algorithms ───────────────────────────────────────────────
+algorithms:
+  - id: hybrid_qoz_gp
+    label: "Hybrid QoZ+GP"
+    type: hybrid_python_cpp
+    binary: qoz_hybrid          # key into binaries above
+    anchor_frac: 0.05           # fraction of coarse grid stored as raw anchors
+    max_step: 0                 # 0 = auto-compute targeting ~1000 coarse pts
+
+  - id: qoz_hpez
+    label: "HPEZ (QoZ -q4)"
+    type: qoz
+    binary: qoz_hpez
+    qoz_level: 4
+
+  - id: sz3_interp
+    label: "SZ3-Interp"
+    type: sz3
+    binary: sz3_interp
+
+# ── Error bounds ─────────────────────────────────────────────
+error_bound_mode: REL           # value-range based (e = eps * data_range)
+
+# For RD curve plots (7 points, matching paper Fig 10 x-axis 2.0–5.0 on -log10)
+error_bounds_rd:
+  - 1.0e-2
+  - 5.0e-3
+  - 1.0e-3
+  - 5.0e-4
+  - 1.0e-4
+  - 5.0e-5
+  - 1.0e-5
+
+# For CR comparison table (matching paper Table 3)
+error_bounds_cr_table:
+  - 1.0e-2
+  - 1.0e-3
+  - 1.0e-4
+
+# ── Temporal HP reuse ────────────────────────────────────────
+temporal:
+  mode: fixed                   # 'fixed' or 'adaptive'
+  refit_every_t: 5              # timesteps between HP refits (fixed mode)
+  adaptive_threshold: 0.05      # fractional variance change to trigger refit (adaptive mode)
+
+# ── Datasets ─────────────────────────────────────────────────
+datasets:
+
+  hurricane_w:
+    label: "Hurricane W"
+    in_paper: false             # not in HPEZ paper — test all fields
+    type: single_file
+    path: /Users/jchen228/Desktop/Argonne/100x500x500/Wf48.bin.f32
+    shape: [100, 500, 500]      # NZ, NY, NX
+    dtype: float32
+    is_temporal: false
+    field: W
+
+  hacc:
+    label: "HACC"
+    in_paper: false             # not in paper — test all fields
+    type: multi_field_1d
+    base_path: /grand/projects/SDR/HACC
+    dtype: float32
+    fields:
+      - id: x
+        glob: "*.f32"           # update once filenames are known
+        subdirectory: ""        # update if fields are in subdirs
+      - id: y
+        glob: "*.f32"
+        subdirectory: ""
+      - id: z
+        glob: "*.f32"
+        subdirectory: ""
+
+  rtm:
+    label: "RTM"
+    in_paper: true
+    type: temporal_3d
+    base_path: /grand/projects/SDR/RTM/449x449x235
+    shape: [235, 449, 449]      # fastest-changing dim first (as noted in data desc)
+    dtype: float32
+    file_glob: "*.f32"
+    n_files: 37                 # match paper; take first 37 sorted alphabetically
+    file_selection: first_n
+    is_temporal: true           # each file = one timestep
+
+  cesm:
+    label: "CESM-ATM"
+    in_paper: true
+    type: multi_field_2d
+    base_path: /grand/projects/SDR/CESM
+    shape: [1800, 3600]
+    dtype: float32
+    is_temporal: false
+    fields:
+      - id: CLDHGH
+        path: CLDHGH            # already extracted directory
+      - id: CLDLOW
+        path: CLDLOW
+      - id: FLDSC
+        path: FLDSC
+      - id: FREQSH
+        path: FREQSH
+      - id: PHIS
+        path: PHIS
+    # file_glob within each field directory: update after inspecting CLDHGH/
+    file_glob: "*.f32"
+    n_files_per_field: 1        # use 1 file per field for initial run
+
+  nyx:
+    label: "Nyx"
+    in_paper: false             # not in paper — test all fields
+    type: multi_field_3d
+    base_path: /grand/projects/SDR/Nyx
+    shape: [512, 512, 512]
+    dtype: float32
+    is_temporal: true           # each z*.dat file = one timestep
+    fields:
+      - id: baryon_density
+        subdirectory: baryon_density
+      - id: dark_matter_density
+        subdirectory: dark_matter_density
+      - id: temperature
+        subdirectory: temperature
+      - id: velocity_x
+        subdirectory: velocity_x
+      - id: velocity_y
+        subdirectory: velocity_y
+      - id: velocity_z
+        subdirectory: velocity_z
+    timesteps: [z2.dat, z3.dat, z4.dat, z25.dat, z35.dat, z225.dat]
+
+  miranda:
+    label: "Miranda"
+    in_paper: true
+    type: spatial_blocks_3d
+    base_path: /grand/projects/SDR/Miranda/SDRBENCH-Miranda-3072x3072x3072
+    shape: [32, 3072, 3072]     # per block (confirmed: 32×3072×3072×4 = 1.2 GB)
+    dtype: float32
+    n_blocks: 7                 # first 7 density blocks (match paper's 7 files)
+    block_selection: first_n
+    block_glob: "density-*.f32"
+    is_temporal: false          # spatial blocks, not timesteps
+
+# ── Output ───────────────────────────────────────────────────
+output:
+  results_dir: ./results
+  results_file: results.json
+  plots_dir: ./plots
+  tmp_dir: /tmp/hybrid_qoz_exp  # local scratch for temp files during compression

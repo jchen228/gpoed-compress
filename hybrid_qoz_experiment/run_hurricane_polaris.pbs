@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N gp_hurricane_w
+#PBS -l select=1:ncpus=32:mem=128gb
+#PBS -l walltime=04:00:00
+#PBS -q debug
+#PBS -A <YOUR_PROJECT>          # <-- fill in your Polaris allocation
+#PBS -o /home/jchen228/Argonne/hybrid_qoz_experiment/results_polaris/job.out
+#PBS -e /home/jchen228/Argonne/hybrid_qoz_experiment/results_polaris/job.err
+
+# ── environment ──────────────────────────────────────────────────────────────
+module load conda/2024-04-29
+conda activate /home/jchen228/envs/gp_env    # or your env with numpy/scipy/matplotlib
+
+# Ensure output dir exists
+mkdir -p /home/jchen228/Argonne/hybrid_qoz_experiment/results_polaris
+
+# ── run ──────────────────────────────────────────────────────────────────────
+cd /home/jchen228/Argonne/hybrid_qoz_experiment
+
+python run_hurricane_w_polaris.py 2>&1 | tee results_polaris/stdout.log
+
+echo "PBS job finished at $(date)"
