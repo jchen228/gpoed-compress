@@ -4,7 +4,7 @@
 #PBS -l walltime=04:00:00
 #PBS -l filesystems=home:eagle
 #PBS -q debug
-#PBS -A hp-aaims
+#PBS -A SDR
 #PBS -o /home/jchen228/Argonne/hybrid_qoz_experiment/results_polaris/job.out
 #PBS -e /home/jchen228/Argonne/hybrid_qoz_experiment/results_polaris/job.err
 

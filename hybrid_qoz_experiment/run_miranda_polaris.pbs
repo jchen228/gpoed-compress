@@ -4,7 +4,7 @@
 #PBS -l walltime=08:00:00
 #PBS -l filesystems=home:eagle
 #PBS -q preemptable
-#PBS -A hp-aaims
+#PBS -A SDR
 #PBS -o /home/jchen228/Argonne/hybrid_qoz_experiment/results_miranda/job.out
 #PBS -e /home/jchen228/Argonne/hybrid_qoz_experiment/results_miranda/job.err
 
